@@ -1,0 +1,26 @@
+# Compiled / system files
+.DS_Store
+Thumbs.db
+*.log
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Node / JS
+node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+.env
+.venv
+
+# JetBrains/VS Code
+.idea/
+.vscode/
+
+# Archives
+*.zip
+*.tar
+*.gz
