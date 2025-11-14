@@ -1,90 +1,300 @@
-# ===========================
-# 👟 Nike Scraper (Selenium)
-# ===========================
-import os, time, random, requests
+import os, re, time, requests, random
+from io import BytesIO
+from PIL import Image
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from PIL import Image
-from io import BytesIO
+from webdriver_manager.chrome import ChromeDriverManager
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# --- CONFIG ---
-URL = "https://www.nike.com/fr/w/hommes-air-force-1-chaussures-5sj3yznik1zy7ok"
-OUTPUT_DIR = "dataset_nike"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-MAX_PRODUCTS = 10
+def setup_driver():
+    """Configure un driver Selenium avec options anti-détection"""
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080")
+    
+    # User agent réaliste
+    options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+    
+    # Désactive la détection webdriver
+    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option('useAutomationExtension', False)
+    
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    driver.execute_cdp_cmd('Network.setUserAgentOverride', {
+        "userAgent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    })
+    driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+    
+    return driver
 
-# --- SELENIUM SETUP ---
-options = Options()
-options.add_argument("--headless")
-options.add_argument("--window-size=1920,1080")
-driver = webdriver.Chrome(service=Service("/chromedriver"), options=options)
-
-def scroll_to_bottom():
-    """Scroll jusqu’à la fin de la page pour charger tous les produits."""
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    while True:
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+def scroll_and_collect_images(query, scroll_count=40, wait_time=2):
+    """Collecte les URLs d'images avec attente du chargement dynamique"""
+    driver = setup_driver()
+    image_urls = set()
+    
+    try:
+        url = f"https://www.pinterest.fr/search/pins/?q={query.replace(' ', '%20')}"
+        print(f"🌐 Ouverture : {url}")
+        driver.get(url)
+        
+        # Attendre le chargement initial
         time.sleep(3)
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
-
-def download_image(url, dest_folder, index):
-    try:
-        r = requests.get(url, timeout=10)
-        img = Image.open(BytesIO(r.content)).convert("RGB")
-        path = os.path.join(dest_folder, f"image_{index}.jpg")
-        img.save(path, "JPEG")
+        
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        no_change_count = 0
+        
+        for i in range(scroll_count):
+            # Scroll progressif (plus naturel)
+            driver.execute_script(f"window.scrollTo(0, {last_height * (i+1) / scroll_count});")
+            time.sleep(wait_time)
+            
+            # Attendre que de nouveaux éléments se chargent
+            try:
+                WebDriverWait(driver, 5).until(
+                    lambda d: d.execute_script("return document.body.scrollHeight") > last_height
+                )
+            except:
+                no_change_count += 1
+                if no_change_count > 3:
+                    print("⚠️ Plus de nouvelles images détectées")
+                    break
+            
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                no_change_count += 1
+            else:
+                no_change_count = 0
+                last_height = new_height
+            
+            # Extraire les images avec plusieurs patterns
+            html = driver.page_source
+            
+            # Pattern 1: URLs directes pinimg
+            urls_pinimg = re.findall(r'https://i\.pinimg\.com/[^"\'>\s]+\.(?:jpg|jpeg|png)', html)
+            
+            # Pattern 2: URLs dans srcset
+            urls_srcset = re.findall(r'https://i\.pinimg\.com/[^"\'>\s,]+(?:jpg|jpeg|png)', html)
+            
+            # Pattern 3: URLs origsize (meilleure qualité)
+            urls_origsize = re.findall(r'https://i\.pinimg\.com/originals/[^"\'>\s]+\.(?:jpg|jpeg|png)', html)
+            
+            all_urls = set(urls_pinimg + urls_srcset + urls_origsize)
+            
+            # Filtrer les miniatures (contiennent 236x ou 474x)
+            filtered_urls = {url for url in all_urls if '236x' not in url and '474x' not in url}
+            
+            image_urls.update(filtered_urls)
+            
+            if i % 5 == 0:
+                print(f"  Scroll {i+1}/{scroll_count} → {len(image_urls)} URLs uniques")
+            
+            # Pause aléatoire pour simuler comportement humain
+            time.sleep(random.uniform(0.5, 1.5))
+    
     except Exception as e:
-        print(f"❌ Erreur téléchargement {url}: {e}")
+        print(f"❌ Erreur lors du scroll : {e}")
+    
+    finally:
+        driver.quit()
+    
+    return list(image_urls)
 
-# --- MAIN SCRAPER ---
-print(f"🚀 Ouverture de {URL}")
-driver.get(URL)
-scroll_to_bottom()
-time.sleep(2)
-
-# Récupération des produits
-products = driver.find_elements(By.CSS_SELECTOR, 'a.product-card__link-overlay')
-print(f"➡️ {len(products)} produits trouvés sur la page Nike.")
-
-for i, product in enumerate(products[:MAX_PRODUCTS]):
-    link = product.get_attribute("href")
-    print(f"\n📦 Produit {i+1}: {link}")
-    driver.get(link)
-    time.sleep(3)
-
-    # Attendre que les images du carrousel se chargent
+def is_valid_sneaker_image(img):
+    """Vérifie la qualité et pertinence de l'image"""
     try:
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_all_elements_located((By.CSS_SELECTOR, "img"))
-        )
-    except:
-        print("⚠️ Aucune image détectée, on passe.")
-        continue
+        # Vérifications de base
+        if img.width < 400 or img.height < 400:
+            return False, "Trop petite"
+        
+        # Ratio acceptable pour une chaussure (évite les bannières)
+        ratio = img.width / img.height
+        if ratio < 0.5 or ratio > 3:
+            return False, f"Ratio incorrect: {ratio:.2f}"
+        
+        # Vérifier que l'image n'est pas trop sombre/claire (souvent = erreur)
+        import numpy as np
+        img_array = np.array(img.convert('L'))
+        mean_brightness = img_array.mean()
+        
+        if mean_brightness < 20 or mean_brightness > 245:
+            return False, f"Luminosité anormale: {mean_brightness:.0f}"
+        
+        return True, "OK"
+    
+    except Exception as e:
+        return False, f"Erreur: {e}"
 
-    imgs = driver.find_elements(By.CSS_SELECTOR, "img")
-    img_urls = []
-    for img in imgs:
-        src = img.get_attribute("src")
-        if src and "media" in src:
-            if src not in img_urls:
-                img_urls.append(src)
+def download_image(img_url, output, index):
+    """Télécharge et valide une image"""
+    try:
+        # Headers pour éviter le blocage
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.pinterest.fr/'
+        }
+        
+        response = requests.get(img_url, timeout=10, headers=headers)
+        
+        if response.status_code != 200:
+            return False, f"HTTP {response.status_code}"
+        
+        img = Image.open(BytesIO(response.content)).convert("RGB")
+        
+        # Validation
+        is_valid, reason = is_valid_sneaker_image(img)
+        if not is_valid:
+            return False, reason
+        
+        # Sauvegarder avec métadonnées
+        filepath = os.path.join(output, f"{index}.jpg")
+        img.save(filepath, "JPEG", quality=95)
+        
+        return True, filepath
+    
+    except Exception as e:
+        return False, str(e)
 
-    print(f"📸 {len(img_urls)} images détectées.")
+def scrape_model(model_name, search_variations, max_images=500):
+    """Scrape principal avec gestion d'erreurs robuste"""
+    model_dir = f"dataset/{model_name.replace(' ', '_').lower()}"
+    os.makedirs(model_dir, exist_ok=True)
+    
+    print(f"\n{'='*60}")
+    print(f"🎯 DATASET : {model_name}")
+    print(f"📁 Dossier : {model_dir}")
+    print(f"🎪 Objectif : {max_images} images")
+    print(f"{'='*60}\n")
+    
+    collected_urls = set()
+    
+    # Collecte des URLs
+    for query in search_variations:
+        print(f"\n🔍 Recherche : '{query}'")
+        urls = scroll_and_collect_images(query, scroll_count=40)
+        
+        new_urls = set(urls) - collected_urls
+        collected_urls.update(urls)
+        
+        print(f"   ✓ {len(new_urls)} nouvelles URLs | Total : {len(collected_urls)}")
+        
+        if len(collected_urls) >= max_images * 1.5:  # Marge pour filtrage
+            print("   ⚠️ Quota atteint, arrêt de la collecte")
+            break
+        
+        time.sleep(random.uniform(2, 4))  # Pause entre recherches
+    
+    collected_urls = list(collected_urls)[:int(max_images * 1.5)]
+    
+    print(f"\n{'='*60}")
+    print(f"📦 TÉLÉCHARGEMENT : {len(collected_urls)} URLs à traiter")
+    print(f"{'='*60}\n")
+    
+    # Téléchargement parallèle avec suivi
+    downloaded_count = 0
+    failed_reasons = {}
+    
+    with ThreadPoolExecutor(max_workers=12) as executor:
+        futures = {
+            executor.submit(download_image, url, model_dir, i): (i, url) 
+            for i, url in enumerate(collected_urls)
+        }
+        
+        for future in as_completed(futures):
+            success, info = future.result()
+            
+            if success:
+                downloaded_count += 1
+                if downloaded_count % 10 == 0:
+                    print(f"   ✅ {downloaded_count}/{max_images} téléchargées")
+            else:
+                # Compter les raisons d'échec
+                failed_reasons[info] = failed_reasons.get(info, 0) + 1
+            
+            if downloaded_count >= max_images:
+                print(f"   🎉 Objectif atteint : {max_images} images !")
+                break
+    
+    # Rapport final
+    print(f"\n{'='*60}")
+    print(f"✅ TERMINÉ : {downloaded_count} images sauvegardées")
+    print(f"📂 Dossier : {model_dir}")
+    
+    if failed_reasons:
+        print(f"\n📊 Raisons d'échec :")
+        for reason, count in sorted(failed_reasons.items(), key=lambda x: -x[1])[:5]:
+            print(f"   - {reason}: {count}x")
+    
+    print(f"{'='*60}\n")
 
-    # Dossier produit
-    product_dir = os.path.join(OUTPUT_DIR, f"Product_{i+1}")
-    os.makedirs(product_dir, exist_ok=True)
+# CONFIGURATION DES MODÈLES À SCRAPER
+SNEAKER_MODELS = {
+    "Asics Gel-Kayano": [
+        "Asics Gel Kayano 14",
+        "Asics Gel Kayano sneakers",
+        "Gel Kayano close up",
+        "Asics Gel Kayano side view",
+        "Asics Gel Kayano on feet",
+        "Gel Kayano product photo",
+        "Asics Gel Kayano detail",
+        "Asics Kayano street style"
+    ],
+    "Adidas Spezial": [
+        "Adidas Spezial blue",
+        "Adidas Spezial sneakers",
+        "Adidas Spezial handball",
+        "Adidas Spezial side view",
+        "Adidas Spezial on feet",
+        "Adidas Spezial close up",
+        "Adidas Spezial product",
+        "Adidas Spezial gum sole"
+    ],
+    "Nike Dunk Low": [
+        "Nike Dunk Low panda",
+        "Nike Dunk Low retro",
+        "Nike Dunk Low sneakers",
+        "Nike Dunk Low side view",
+        "Nike Dunk Low on feet",
+        "Nike Dunk Low close up",
+        "Nike Dunk Low product photo",
+        "Nike Dunk Low detail"
+    ],
+    "New Balance 2002R": [
+        "New Balance 2002R protection pack",
+        "New Balance 2002R sneakers",
+        "NB 2002R grey",
+        "New Balance 2002R side view",
+        "New Balance 2002R on feet",
+        "New Balance 2002R close up",
+        "New Balance 2002R product",
+        "New Balance 2002R detail"
+    ]
+}
 
-    # Téléchargement
-    for j, url in enumerate(img_urls):
-        download_image(url, product_dir, j + 1)
-
-driver.quit()
-print("\n✅ Scraping Nike terminé !")
+# EXEMPLE D'UTILISATION
+if __name__ == "__main__":
+    print("\n" + "="*70)
+    print("🚀 SCRAPER MULTI-MODÈLES DE SNEAKERS")
+    print("="*70)
+    print(f"📊 {len(SNEAKER_MODELS)} modèles à scraper")
+    print(f"📦 Total attendu : {len(SNEAKER_MODELS) * 150} images")
+    print("="*70 + "\n")
+    
+    # Scraper tous les modèles
+    for model_name, search_queries in SNEAKER_MODELS.items():
+        try:
+            scrape_model(model_name, search_queries, max_images=150)
+            print(f"\n⏳ Pause de 5 secondes avant le prochain modèle...\n")
+            time.sleep(5)  # Pause entre modèles pour éviter le blocage
+        except Exception as e:
+            print(f"\n❌ ERREUR sur {model_name}: {e}\n")
+            continue
+    
+    print("\n" + "="*70)
+    print("🎉 SCRAPING TERMINÉ POUR TOUS LES MODÈLES")
+    print("="*70)
