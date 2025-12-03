@@ -1,11 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import { decodeJpeg } from '@tensorflow/tfjs-react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
-/**
- * Convertit une image (URI) en tenseur [1, 224, 224, 3]
- * pour TensorFlow.js (MobileNet ou ton futur modèle).
- */
 export async function uriToTensor(uri) {
   // Lecture du fichier image en base64
   const imgB64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
@@ -17,11 +13,11 @@ export async function uriToTensor(uri) {
   // Décodage JPEG → TensorFlow tensor
   const imageTensor = decodeJpeg(raw);
 
-  // Redimensionnement et normalisation [0,1]
+  // Redimensionnement
   const resized = tf.image
     .resizeBilinear(imageTensor, [224, 224])
-    .div(255)
-    .expandDims(0);
+    // .div(255)  <-- 🛑 LIGNE SUPPRIMÉE ! On laisse les valeurs entre 0 et 255
+    .expandDims(0); // Ajoute la dimension du batch [1, 224, 224, 3]
 
   return resized;
 }

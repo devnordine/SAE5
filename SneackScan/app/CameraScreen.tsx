@@ -1,18 +1,18 @@
 // app/CameraScreen.tsx
 import React from 'react';
-import { SafeAreaView, Text, StyleSheet } from 'react-native';
-import CameraClassifier from '../components/CameraClassifier.js';
+import { View, StyleSheet, StatusBar } from 'react-native'; // On utilise View simple
+import CameraClassifier from '../components/CameraClassifier';
 
 export default function CameraScreen() {
   return (
-    <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Scanner une sneaker</Text>
+    <View style={styles.container}>
+      {/* On rend la barre d'état blanche pour aller avec le thème sombre */}
+      <StatusBar barStyle="light-content" backgroundColor="#121212" />
       <CameraClassifier />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  title: { fontSize: 20, fontWeight: '700', textAlign: 'center', marginVertical: 8 },
+  container: { flex: 1, backgroundColor: '#121212' },
 });

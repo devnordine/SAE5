@@ -1,0 +1,11 @@
+# Outils de Scraping (pour multi_brand_scraper.py)
+requests>=2.31.0
+Pillow>=10.0.0
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# Outils d'Intelligence Artificielle (pour l'entraînement)
+tensorflow>=2.15.0
+tensorflowjs>=4.17.0
+numpy>=1.26.0
+matplotlib>=3.8.0
