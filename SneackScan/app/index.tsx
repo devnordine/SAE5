@@ -45,7 +45,7 @@ export default function HomeScreen() {
         const sorted = history.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setDashboardData({
           totalScans: history.length,
-          recentActivity: sorted.slice(0, 5) 
+          recentActivity: sorted.slice(0, 3) 
         });
       } else {
         setDashboardData({ totalScans: 0, recentActivity: [] });
