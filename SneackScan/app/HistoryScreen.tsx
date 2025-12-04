@@ -1,122 +1,165 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, Image, StyleSheet, ActivityIndicator, RefreshControl } from 'react-native';
-import { useFocusEffect } from 'expo-router';
+import { View, Text, StyleSheet, FlatList, Image, ActivityIndicator, TouchableOpacity, StatusBar } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter, useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
-type HistoryItem = {
+// 🔗 VOTRE VPS
+const API_URL = 'http://51.38.186.253:3000';
+
+// Typage pour éviter les erreurs TypeScript
+interface HistoryItem {
   id: number;
   user_id: number;
   shoe_name: string;
   confidence: number;
   image_url: string;
   date: string;
-};
-
-const API_BASE = 'http://51.38.186.253:3000';
+}
 
 export default function HistoryScreen() {
-  const [history, setHistory] = useState<HistoryItem[] | null>(null);
+  const router = useRouter();
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
 
-  const loadHistory = async () => {
+  const fetchHistory = async () => {
     try {
       setLoading(true);
       const userJson = await AsyncStorage.getItem('user');
-      if (!userJson) {
-        setHistory([]);
-        setLoading(false);
-        return;
-      }
+      if (!userJson) return;
+      
       const user = JSON.parse(userJson);
       const userId = user.id ?? user.user_id ?? 1;
-      const res = await fetch(`${API_BASE}/history/${userId}`);
-      const data = await res.json();
-      setHistory(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setHistory([]);
+
+      const response = await fetch(`${API_URL}/history/${userId}`);
+      const data = await response.json();
+
+      if (Array.isArray(data)) {
+        // Tri décroissant (plus récent en haut)
+        const sorted = data.sort((a: any, b: any) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        setHistory(sorted);
+      }
+    } catch (error) {
+      console.log(error);
     } finally {
       setLoading(false);
     }
   };
 
-  useFocusEffect(useCallback(() => {
-    loadHistory();
-  }, []));
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadHistory();
-    setRefreshing(false);
-  };
-
-  if (loading && !refreshing) {
-    return (
-      <View style={styles.center}>
-        <ActivityIndicator size="large" color="#1e90ff" />
-      </View>
-    );
-  }
-
-  if (!history || history.length === 0) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.emptyText}>{"Aucun scan dans l'historique"}.</Text>
-        <FlatList
-          data={[]}
-          renderItem={null}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-        />
-      </View>
-    );
-  }
+  useFocusEffect(
+    useCallback(() => { fetchHistory(); }, [])
+  );
 
   const renderItem = ({ item }: { item: HistoryItem }) => {
-    const imageUrl = item.image_url.startsWith('http') ? item.image_url : `${API_BASE}${item.image_url}`;
-    const percentage = (item.confidence * 100).toFixed(1);
-    const date = new Date(item.date).toLocaleString('fr-FR');
-    // Nicely format shoe_name (replace underscores)
-    const shoeLabel = item.shoe_name ? item.shoe_name.replace(/_/g, ' ') : 'Chaussure inconnue';
+    const imageUrl = item.image_url.startsWith('http') 
+      ? item.image_url 
+      : `${API_URL}${item.image_url}`;
+      
+    const name = item.shoe_name ? item.shoe_name.replace(/_/g, ' ') : 'Inconnu';
+    
+    let dateStr = "Date inconnue";
+    try {
+        const d = new Date(item.date);
+        dateStr = `${d.toLocaleDateString('fr-FR')} • ${d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
+    } catch(e) {}
 
     return (
       <View style={styles.card}>
-        <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
-        <View style={styles.info}>
-          <Text style={styles.shoeName}>{shoeLabel}</Text>
-          <Text style={styles.confidence}>{percentage}%</Text>
-          <Text style={styles.date}>{date}</Text>
+        <Image source={{ uri: imageUrl }} style={styles.cardImage} resizeMode="cover" />
+        
+        <View style={styles.cardContent}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.shoeName}>{name.toUpperCase()}</Text>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{Math.round(item.confidence * 100)}%</Text>
+            </View>
+          </View>
+          
+          <View style={styles.cardFooter}>
+            <View style={{flexDirection:'row', alignItems:'center'}}>
+              <Ionicons name="calendar-outline" size={14} color="#666" style={{marginRight:5}} />
+              <Text style={styles.dateText}>{dateStr}</Text>
+            </View>
+          </View>
         </View>
       </View>
     );
   };
 
   return (
-    <FlatList
-      contentContainerStyle={styles.list}
-      data={history}
-      keyExtractor={(i) => String(i.id)}
-      renderItem={renderItem}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-    />
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#121212" />
+      
+      {/* HEADER AVEC MARGE DE SÉCURITÉ */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Historique complet</Text>
+        <View style={{width: 40}} /> 
+      </View>
+
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color="#1e90ff" />
+        </View>
+      ) : (
+        <FlatList
+          data={history}
+          keyExtractor={(item) => item.id.toString()}
+          renderItem={renderItem}
+          contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <View style={styles.empty}>
+              <Ionicons name="file-tray-outline" size={50} color="#333" />
+              <Text style={styles.emptyText}>Aucun historique disponible</Text>
+            </View>
+          }
+        />
+      )}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
-  container: { flex: 1, padding: 20, backgroundColor: '#121212' },
-  list: { padding: 20, backgroundColor: '#121212' },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: '#1e1e1e',
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginBottom: 16,
-    elevation: 3,
+  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  
+  // --- HEADER CORRIGÉ ---
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 20, 
+    paddingTop: 60, // 👈 ICI : On laisse 60px pour l'encoche
+    paddingBottom: 20 
   },
-  image: { width: 120, height: 120 },
-  info: { flex: 1, padding: 12, justifyContent: 'center' },
-  shoeName: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 6 },
-  confidence: { color: '#1e90ff', fontWeight: '700', marginBottom: 6 },
-  date: { color: '#999' },
-  emptyText: { color: '#fff', textAlign: 'center', marginTop: 40 },
+  
+  backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1a1a1a', justifyContent: 'center', alignItems: 'center' },
+  title: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+
+  card: {
+    backgroundColor: '#1a1a1a',
+    borderRadius: 20,
+    marginBottom: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#2a2a2a'
+  },
+  cardImage: { width: '100%', height: 180 },
+  cardContent: { padding: 15 },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  shoeName: { color: '#fff', fontSize: 18, fontWeight: '900', flex: 1 },
+  
+  badge: { backgroundColor: '#1e90ff', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  badgeText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  
+  cardFooter: { flexDirection: 'row', justifyContent: 'space-between' },
+  dateText: { color: '#666', fontSize: 13 },
+
+  empty: { alignItems: 'center', marginTop: 100, opacity: 0.6 },
+  emptyText: { color: '#666', marginTop: 15, fontSize: 16 }
 });
