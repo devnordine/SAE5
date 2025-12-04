@@ -61,7 +61,7 @@ export default function HistoryScreen() {
   if (!history || history.length === 0) {
     return (
       <View style={styles.container}>
-        <Text style={styles.emptyText}>Aucun scan dans l'historique.</Text>
+        <Text style={styles.emptyText}>{"Aucun scan dans l'historique"}.</Text>
         <FlatList
           data={[]}
           renderItem={null}
