@@ -1,48 +1,52 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, ScrollView } from 'react-native';
+import React, { useState } from 'react';
+import { 
+  View, 
+  Text, 
+  TextInput, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Alert, 
+  ActivityIndicator, 
+  KeyboardAvoidingView, 
+  Platform,
+  ScrollView 
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 
-// 👇 REMPLACEZ PAR L'IP DE VOTRE VPS ! (Gardez le http:// et :3000)
-// Exemple : const API_URL = 'http://192.168.1.35:3000';
-const API_URL = 'http://51.38.186.253:3000'; 
+// 👇 TRES IMPORTANT : Mettez l'IP de votre VPS ici (pas localhost !)
+const API_URL = 'http://51.38.186.253:3000';
 
 export default function AuthScreen() {
   const router = useRouter();
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Formulaire
+  // Champs du formulaire
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
   const [nom, setNom] = useState('');
   const [prenom, setPrenom] = useState('');
 
-  // Vérification connexion automatique
-  useEffect(() => {
-    checkLogin();
-  }, []);
-
-  const checkLogin = async () => {
-    const user = await AsyncStorage.getItem('user');
-    if (user) router.replace('/CameraScreen');
-  };
-
   const handleAuth = async () => {
-    if (!username || !password) {
-      Alert.alert("Erreur", "Pseudo et mot de passe obligatoires.");
+    if (!username || !password || (!isLogin && (!email || !prenom))) {
+      Alert.alert("Erreur", "Veuillez remplir tous les champs obligatoires.");
       return;
     }
 
     setLoading(true);
     const endpoint = isLogin ? '/login' : '/register';
     
+    // Préparation des données
     const payload = isLogin 
       ? { username, password }
-      : { username, password, email, nom, prenom };
+      : { username, email, password, nom, prenom };
 
     try {
+      console.log(`Tentative de connexion vers : ${API_URL}${endpoint}`);
+      
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,58 +55,167 @@ export default function AuthScreen() {
 
       const data = await response.json();
 
-      if (data.success) {
-        const userData = { 
-          id: data.id, 
-          prenom: data.prenom || prenom || username 
-        };
-        await AsyncStorage.setItem('user', JSON.stringify(userData));
-        Alert.alert("Succès", `Bienvenue ${userData.prenom} !`);
-        router.replace('/');
+      if (response.ok && data.success) {
+        // Sauvegarde de l'utilisateur dans le téléphone
+        await AsyncStorage.setItem('user', JSON.stringify({
+          id: data.id,
+          username: username,
+          prenom: data.prenom || prenom // On garde le prénom pour l'accueil
+        }));
+        
+        Alert.alert("Succès", isLogin ? "Connexion réussie !" : "Compte créé avec succès !");
+        router.replace('/'); // Redirection vers l'accueil
       } else {
-        Alert.alert("Erreur", data.message || "Problème serveur");
+        Alert.alert("Erreur", data.message || data.error || "Une erreur est survenue.");
       }
-    } catch (error) {
-      Alert.alert("Erreur Réseau", "Impossible de joindre le VPS. Vérifiez l'IP.");
+
+    } catch (error: any) {
+      console.error("Erreur Auth:", error);
+      Alert.alert(
+        "Erreur Réseau", 
+        "Impossible de joindre le serveur. Vérifiez votre connexion internet."
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>SNEACKSCAN</Text>
-      <Text style={styles.subtitle}>{isLogin ? 'Connexion' : 'Inscription'}</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === "ios" ? "padding" : "height"} 
+      style={styles.container}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <View style={styles.logoContainer}>
+          <Ionicons name="scan-circle-outline" size={100} color="#1e90ff" />
+          <Text style={styles.title}>SneackScan</Text>
+          <Text style={styles.subtitle}>
+            {isLogin ? "Connectez-vous pour continuer" : "Créez votre compte"}
+          </Text>
+        </View>
 
-      {!isLogin && (
-        <>
-          <TextInput placeholder="Prénom" placeholderTextColor="#666" style={styles.input} value={prenom} onChangeText={setPrenom} />
-          <TextInput placeholder="Nom" placeholderTextColor="#666" style={styles.input} value={nom} onChangeText={setNom} />
-          <TextInput placeholder="Email" placeholderTextColor="#666" style={styles.input} autoCapitalize="none" value={email} onChangeText={setEmail} />
-        </>
-      )}
+        <View style={styles.form}>
+          {/* Nom & Prénom (Inscription uniquement) */}
+          {!isLogin && (
+            <View style={styles.row}>
+              <View style={[styles.inputContainer, { flex: 1, marginRight: 5 }]}>
+                <Ionicons name="person-outline" size={20} color="#666" style={styles.icon} />
+                <TextInput 
+                  placeholder="Prénom" 
+                  placeholderTextColor="#666" 
+                  style={styles.input} 
+                  value={prenom} 
+                  onChangeText={setPrenom} 
+                />
+              </View>
+              <View style={[styles.inputContainer, { flex: 1, marginLeft: 5 }]}>
+                <Ionicons name="person-outline" size={20} color="#666" style={styles.icon} />
+                <TextInput 
+                  placeholder="Nom" 
+                  placeholderTextColor="#666" 
+                  style={styles.input} 
+                  value={nom} 
+                  onChangeText={setNom} 
+                />
+              </View>
+            </View>
+          )}
 
-      <TextInput placeholder="Identifiant" placeholderTextColor="#666" style={styles.input} autoCapitalize="none" value={username} onChangeText={setUsername} />
-      <TextInput placeholder="Mot de passe" placeholderTextColor="#666" style={styles.input} secureTextEntry value={password} onChangeText={setPassword} />
+          {/* Email (Inscription uniquement) */}
+          {!isLogin && (
+            <View style={styles.inputContainer}>
+              <Ionicons name="mail-outline" size={20} color="#666" style={styles.icon} />
+              <TextInput 
+                placeholder="Email" 
+                placeholderTextColor="#666" 
+                style={styles.input} 
+                value={email} 
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
+          )}
 
-      <TouchableOpacity style={styles.btnMain} onPress={handleAuth} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>{isLogin ? 'Se connecter' : "S'inscrire"}</Text>}
-      </TouchableOpacity>
+          {/* Username */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="person-circle-outline" size={20} color="#666" style={styles.icon} />
+            <TextInput 
+              placeholder="Nom d'utilisateur" 
+              placeholderTextColor="#666" 
+              style={styles.input} 
+              value={username} 
+              onChangeText={setUsername}
+              autoCapitalize="none" 
+            />
+          </View>
 
-      <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchBtn}>
-        <Text style={styles.switchText}>{isLogin ? "Créer un compte" : "J'ai déjà un compte"}</Text>
-      </TouchableOpacity>
-    </ScrollView>
+          {/* Mot de passe */}
+          <View style={styles.inputContainer}>
+            <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.icon} />
+            <TextInput 
+              placeholder="Mot de passe" 
+              placeholderTextColor="#666" 
+              style={styles.input} 
+              value={password} 
+              onChangeText={setPassword} 
+              secureTextEntry 
+            />
+          </View>
+
+          <TouchableOpacity style={styles.button} onPress={handleAuth} disabled={loading}>
+            {loading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>{isLogin ? "Se connecter" : "S'inscrire"}</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchButton}>
+            <Text style={styles.switchText}>
+              {isLogin ? "Pas encore de compte ? Créer un compte" : "Déjà un compte ? Se connecter"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flexGrow: 1, backgroundColor: '#121212', justifyContent: 'center', padding: 20 },
-  title: { fontSize: 40, fontWeight: '900', color: '#fff', textAlign: 'center', marginBottom: 10, letterSpacing: 2 },
-  subtitle: { fontSize: 18, color: '#1e90ff', textAlign: 'center', marginBottom: 30, textTransform: 'uppercase' },
-  input: { backgroundColor: '#222', color: '#fff', borderRadius: 10, padding: 15, marginBottom: 15, fontSize: 16, borderWidth: 1, borderColor: '#333' },
-  btnMain: { backgroundColor: '#1e90ff', padding: 15, borderRadius: 10, alignItems: 'center', marginTop: 10 },
-  btnText: { color: '#fff', fontWeight: 'bold', fontSize: 18 },
-  switchBtn: { marginTop: 20, alignItems: 'center' },
-  switchText: { color: '#888', fontSize: 14 }
+  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  scrollContainer: { flexGrow: 1, justifyContent: 'center', padding: 20 },
+  logoContainer: { alignItems: 'center', marginBottom: 40 },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginTop: 10 },
+  subtitle: { fontSize: 16, color: '#888', marginTop: 5 },
+  form: { width: '100%' },
+  row: { flexDirection: 'row', justifyContent: 'space-between' },
+  inputContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#1a1a1a', 
+    borderRadius: 12, 
+    marginBottom: 15, 
+    paddingHorizontal: 15,
+    height: 55,
+    borderWidth: 1,
+    borderColor: '#333'
+  },
+  icon: { marginRight: 10 },
+  input: { flex: 1, color: '#fff', fontSize: 16 },
+  button: { 
+    backgroundColor: '#1e90ff', 
+    padding: 18, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    marginTop: 10,
+    shadowColor: '#1e90ff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5
+  },
+  buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  switchButton: { marginTop: 20, alignItems: 'center' },
+  switchText: { color: '#1e90ff', fontSize: 14 }
 });
