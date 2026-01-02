@@ -5,14 +5,14 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as tf from '@tensorflow/tfjs';
 import { bundleResourceIO, decodeJpeg } from '@tensorflow/tfjs-react-native';
-import * as FileSystem from 'expo-file-system'; // Assurez-vous d'avoir fait: npx expo install expo-file-system
+// 👇 Import Legacy pour éviter le bug de lecture de fichier
+import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // 🔗 ADRESSE DE VOTRE SERVEUR VPS
 const API_URL = 'http://51.38.186.253:3000';
 
-// Chargement des fichiers du modèle
 const modelJson = require('../assets/model/model.json');
 const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
 const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
@@ -33,7 +33,7 @@ export default function CameraClassifier() {
   const [model, setModel] = useState(null);
   
   // États UI
-  const [flashMode, setFlashMode] = useState('off');
+  const [flashMode, setFlashMode] = useState('off'); // 'off' | 'on'
   const [scanResult, setScanResult] = useState(null); 
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -53,7 +53,7 @@ export default function CameraClassifier() {
     })();
   }, []);
 
-  // --- FONCTION D'ANALYSE CENTRALE ---
+  // --- FONCTION D'ANALYSE ---
   const analyzeBase64 = async (base64Data, uriForDisplay) => {
     if (!model) {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
@@ -63,14 +63,12 @@ export default function CameraClassifier() {
     setIsProcessing(true);
 
     try {
-      // 1. Conversion Base64 -> Tensor
       const imgBuffer = tf.util.encodeString(base64Data, 'base64').buffer;
       const raw = new Uint8Array(imgBuffer);
       const imageTensor = decodeJpeg(raw);
       const resized = tf.image.resizeBilinear(imageTensor, [224, 224]);
       const normalized = resized.div(255.0).expandDims(0); 
       
-      // 2. Prédiction
       const prediction = await model.predict(normalized);
       const data = await prediction.data();
       
@@ -86,7 +84,6 @@ export default function CameraClassifier() {
       const shoeName = OUTPUT_CLASSES[maxIndex] || "Inconnu";
       console.log(`IA Prediction: ${shoeName} (${(maxProb * 100).toFixed(1)}%)`);
 
-      // 3. Envoi au serveur
       await uploadScan(uriForDisplay, shoeName, maxProb);
 
     } catch (error) {
@@ -96,30 +93,26 @@ export default function CameraClassifier() {
     }
   };
 
-  // CAS 1 : Caméra (On récupère le Base64 directement = PLUS RAPIDE)
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
     try {
       const photo = await cameraRef.current.takePictureAsync({
         quality: 0.8,
-        base64: true, // ✅ On demande le base64 directement à la caméra
+        base64: true,
         skipProcessing: true,
       });
-      
-      // Pas besoin de FileSystem ici, on a déjà le base64
       await analyzeBase64(photo.base64, photo.uri);
-      
     } catch (error) {
       console.error(error);
       Alert.alert("Erreur", "Problème avec la caméra");
     }
   };
 
-  // CAS 2 : Galerie (On lit le fichier = Correction du BUG FileSystem)
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        // 👇 CORRECTION : On revient à MediaTypeOptions car votre version le préfère
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
@@ -128,7 +121,6 @@ export default function CameraClassifier() {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const uri = result.assets[0].uri;
         
-        // 🛠 CORRECTION ICI : On utilise la string 'base64' au lieu de l'enum
         const base64 = await FileSystem.readAsStringAsync(uri, {
           encoding: 'base64', 
         });
@@ -185,6 +177,7 @@ export default function CameraClassifier() {
     }
   };
 
+  // Fonction pour basculer le flash
   const toggleFlash = () => {
     setFlashMode(prev => prev === 'off' ? 'on' : 'off');
   };
@@ -201,27 +194,27 @@ export default function CameraClassifier() {
     );
   }
 
-  // 🛠 CORRECTION STRUCTURE : CameraView ne contient plus d'enfants
   return (
     <View style={{ flex: 1, backgroundColor: 'black' }}>
       
-      {/* 1. LA CAMÉRA EN FOND */}
       <CameraView 
-        style={StyleSheet.absoluteFill} // Prend tout l'écran
+        style={StyleSheet.absoluteFill} 
         ref={cameraRef} 
         facing="back"
-        flash={flashMode}
+        flash={flashMode} // ⚡ Le Flash est connecté ici
       />
 
-      {/* 2. L'INTERFACE PAR DESSUS (En Absolute) */}
+      {/* Interface utilisateur par-dessus la caméra */}
       <View style={styles.overlayContainer}>
         
-        {/* HAUT : Retour & Flash */}
+        {/* Barre du haut */}
         <View style={styles.topBar}>
+          {/* Bouton Retour */}
           <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
             <Ionicons name="arrow-back" size={28} color="#fff" />
           </TouchableOpacity>
           
+          {/* ⚡ Bouton Flash */}
           <TouchableOpacity onPress={toggleFlash} style={styles.iconButton}>
             <Ionicons 
               name={flashMode === 'on' ? "flash" : "flash-off"} 
@@ -231,14 +224,12 @@ export default function CameraClassifier() {
           </TouchableOpacity>
         </View>
 
-        {/* BAS : Galerie & Scan */}
+        {/* Barre du bas */}
         <View style={styles.bottomBar}>
-          {/* Galerie */}
           <TouchableOpacity onPress={pickImage} style={styles.galleryButton} disabled={isProcessing}>
             <Ionicons name="images-outline" size={30} color="#fff" />
           </TouchableOpacity>
 
-          {/* Bouton Scan */}
           {isProcessing ? (
             <ActivityIndicator size="large" color="#1e90ff" style={styles.loader} />
           ) : (
@@ -247,40 +238,29 @@ export default function CameraClassifier() {
             </TouchableOpacity>
           )}
 
-          {/* Espace vide pour équilibrer */}
           <View style={{ width: 50 }} /> 
         </View>
       </View>
 
-      {/* ================= MODAL RÉSULTAT ================= */}
+      {/* Modal Résultat */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             
             <Image source={{ uri: scanResult?.imageUrl }} style={styles.modalImage} />
-            
-            <Text style={styles.modalTitle}>
-              {scanResult?.shoeName?.replace(/_/g, ' ')}
-            </Text>
+            <Text style={styles.modalTitle}>{scanResult?.shoeName?.replace(/_/g, ' ')}</Text>
             
             <View style={styles.confBadge}>
-                <Text style={styles.modalConf}>
-                Confiance IA : {Math.round(scanResult?.confidence * 100)}%
-                </Text>
+                <Text style={styles.modalConf}>Confiance IA : {Math.round(scanResult?.confidence * 100)}%</Text>
             </View>
 
-            {/* PRIX */}
             {scanResult?.marketData?.prix > 0 ? (
               <View style={styles.priceBox}>
                 <Text style={styles.priceLabel}>Meilleure offre trouvée :</Text>
                 <Text style={styles.priceValue}>{scanResult.marketData.prix} €</Text>
                 <Text style={styles.shopName}>sur {scanResult.marketData.boutique}</Text>
-                
                 {scanResult.marketData.lien ? (
-                    <TouchableOpacity 
-                    style={styles.buyBtn}
-                    onPress={() => Linking.openURL(scanResult.marketData.lien)}
-                    >
+                    <TouchableOpacity style={styles.buyBtn} onPress={() => Linking.openURL(scanResult.marketData.lien)}>
                     <Text style={styles.buyBtnText}>ACHETER MAINTENANT</Text>
                     <Ionicons name="cart" size={20} color="white" style={{marginLeft:8}} />
                     </TouchableOpacity>
@@ -290,13 +270,7 @@ export default function CameraClassifier() {
               <Text style={styles.noPrice}>Prix non disponible pour l'instant</Text>
             )}
 
-            <TouchableOpacity 
-              style={styles.closeBtn} 
-              onPress={() => {
-                setModalVisible(false);
-                setScanResult(null);
-              }}
-            >
+            <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setScanResult(null); }}>
               <Text style={styles.closeBtnText}>Fermer</Text>
             </TouchableOpacity>
 
@@ -312,25 +286,12 @@ const styles = StyleSheet.create({
   btnPermission: { backgroundColor: '#1e90ff', padding: 15, borderRadius: 10 },
   btnText: { color: 'white', fontWeight: 'bold' },
   
-  // Nouveau conteneur pour l'interface qui flotte au-dessus de la caméra
-  overlayContainer: {
-    flex: 1,
-    justifyContent: 'space-between', // Pousse topBar en haut et bottomBar en bas
-    paddingVertical: 50,
-    paddingHorizontal: 20,
-  },
+  overlayContainer: { flex: 1, justifyContent: 'space-between', paddingVertical: 50, paddingHorizontal: 20 },
   
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
+  topBar: { flexDirection: 'row', justifyContent: 'space-between' },
   iconButton: { padding: 10, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 25 },
   
-  bottomBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
+  bottomBar: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
   galleryButton: { padding: 15, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
   
   scanBtn: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 4, borderColor: '#fff' },
