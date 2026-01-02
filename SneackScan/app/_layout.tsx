@@ -1,25 +1,32 @@
 import { Stack } from "expo-router";
 import { useEffect, useState, useRef } from "react";
 import { View, Text, StyleSheet, Animated, Dimensions, StatusBar } from "react-native";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 const { height, width } = Dimensions.get('window');
 
 export default function RootLayout() {
+  const router = useRouter();
   const [appIsReady, setAppIsReady] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
   
-  // Animations Splash Screen
+  // animations Splash 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.5)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // 1. Apparition Logo
+    initApp();
+  }, []);
+
+  const initApp = async () => {
+    // animations
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
     ]).start();
 
-    // 2. Scan Laser
     Animated.loop(
       Animated.sequence([
         Animated.timing(scanLineAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
@@ -27,11 +34,32 @@ export default function RootLayout() {
       ])
     ).start();
 
-    // 3. Fin du chargement
+    // vérif auth
+    await checkAuth();
+
+    // fin du splash
     setTimeout(() => {
       setAppIsReady(true);
     }, 2500);
-  }, []);
+  };
+
+  const checkAuth = async () => {
+    try {
+      const userJson = await AsyncStorage.getItem('user');
+      
+      if (userJson) {
+        console.log('✅ Utilisateur connecté, redirection vers index');
+        
+      } else {
+        console.log('❌ Pas d\'utilisateur, redirection vers auth');
+        
+      }
+    } catch (error) {
+      console.error('Erreur checkAuth:', error);
+    } finally {
+      setCheckingAuth(false);
+    }
+  };
 
   const translateY = scanLineAnim.interpolate({
     inputRange: [0, 1],
@@ -46,27 +74,23 @@ export default function RootLayout() {
   if (!appIsReady) {
     return (
       <View style={styles.splashContainer}>
-        {/* On cache la barre de statut pendant le chargement */}
         <StatusBar hidden /> 
-        
         <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }], alignItems: 'center' }}>
           <Text style={styles.logoText}>SNEACKSCAN</Text>
           <Text style={styles.subText}>{"L'IA au bout des pieds"}</Text>
         </Animated.View>
-
         <Animated.View style={[styles.scanLine, { transform: [{ translateY }], opacity: lineOpacity }]} />
       </View>
     );
   }
 
   return (
-    // 👇 LA CORRECTION EST ICI : screenOptions={{ headerShown: false }}
-    // Cela enlève la barre blanche sur TOUTES les pages (Auth, History, etc.)
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />
       <Stack.Screen name="AuthScreen" />
       <Stack.Screen name="CameraScreen" />
       <Stack.Screen name="HistoryScreen" />
+      <Stack.Screen name="AdminScreen" />
     </Stack>
   );
 }
