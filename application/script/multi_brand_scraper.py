@@ -89,7 +89,14 @@ def scroll_and_collect_images(query, scroll_count=40, wait_time=2):
             # Filtrer les miniatures (contiennent 236x ou 474x)
             filtered_urls = {url for url in all_urls if '236x' not in url and '474x' not in url}
             
-            image_urls.update(filtered_urls)
+            # Éviter les doublons d'URL (parfois Pinterest duplique avec des paramètres)
+            unique_filtered = set()
+            for url in filtered_urls:
+                # Nettoyer l'URL des paramètres de tracking
+                clean_url = url.split('?')[0]
+                unique_filtered.add(clean_url)
+            
+            image_urls.update(unique_filtered)
             
             if i % 5 == 0:
                 print(f"  Scroll {i+1}/{scroll_count} → {len(image_urls)} URLs uniques")
@@ -130,8 +137,24 @@ def is_valid_sneaker_image(img):
     except Exception as e:
         return False, f"Erreur: {e}"
 
-def download_image(img_url, output, index):
-    """Télécharge et valide une image"""
+def compute_image_hash(img):
+    """Calcule un hash perceptuel pour détecter les doublons"""
+    import hashlib
+    # Redimensionner à 8x8 pour comparaison rapide
+    img_small = img.resize((8, 8), Image.Resampling.LANCZOS).convert('L')
+    
+    # Calculer la moyenne
+    pixels = list(img_small.getdata())
+    avg = sum(pixels) / len(pixels)
+    
+    # Créer un hash basé sur les pixels au-dessus de la moyenne
+    bits = ''.join('1' if p > avg else '0' for p in pixels)
+    
+    # Convertir en hash hex
+    return hashlib.md5(bits.encode()).hexdigest()
+
+def download_image(img_url, output, index, existing_hashes):
+    """Télécharge et valide une image en évitant les doublons"""
     try:
         # Headers pour éviter le blocage
         headers = {
@@ -142,23 +165,29 @@ def download_image(img_url, output, index):
         response = requests.get(img_url, timeout=10, headers=headers)
         
         if response.status_code != 200:
-            return False, f"HTTP {response.status_code}"
+            return False, f"HTTP {response.status_code}", None
         
         img = Image.open(BytesIO(response.content)).convert("RGB")
         
-        # Validation
+        # Validation de base
         is_valid, reason = is_valid_sneaker_image(img)
         if not is_valid:
-            return False, reason
+            return False, reason, None
+        
+        # Vérifier si l'image est un doublon
+        img_hash = compute_image_hash(img)
+        
+        if img_hash in existing_hashes:
+            return False, "Doublon détecté", None
         
         # Sauvegarder avec métadonnées
         filepath = os.path.join(output, f"{index}.jpg")
         img.save(filepath, "JPEG", quality=95)
         
-        return True, filepath
+        return True, filepath, img_hash
     
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
 
 def scrape_model(model_name, search_variations, max_images=500):
     """Scrape principal avec gestion d'erreurs robuste"""
@@ -198,20 +227,23 @@ def scrape_model(model_name, search_variations, max_images=500):
     # Téléchargement parallèle avec suivi
     downloaded_count = 0
     failed_reasons = {}
+    existing_hashes = set()  # Pour tracker les doublons
     
     with ThreadPoolExecutor(max_workers=12) as executor:
         futures = {
-            executor.submit(download_image, url, model_dir, i): (i, url) 
+            executor.submit(download_image, url, model_dir, i, existing_hashes): (i, url) 
             for i, url in enumerate(collected_urls)
         }
         
         for future in as_completed(futures):
-            success, info = future.result()
+            success, info, img_hash = future.result()
             
             if success:
                 downloaded_count += 1
+                if img_hash:
+                    existing_hashes.add(img_hash)  # Ajouter le hash
                 if downloaded_count % 10 == 0:
-                    print(f"   ✅ {downloaded_count}/{max_images} téléchargées")
+                    print(f"   ✅ {downloaded_count}/{max_images} téléchargées ({len(existing_hashes)} uniques)")
             else:
                 # Compter les raisons d'échec
                 failed_reasons[info] = failed_reasons.get(info, 0) + 1
@@ -234,45 +266,55 @@ def scrape_model(model_name, search_variations, max_images=500):
 
 # CONFIGURATION DES MODÈLES À SCRAPER
 SNEAKER_MODELS = {
-    "Asics Gel-Kayano": [
-        "Asics Gel Kayano 14",
-        "Asics Gel Kayano sneakers",
-        "Gel Kayano close up",
-        "Asics Gel Kayano side view",
-        "Asics Gel Kayano on feet",
-        "Gel Kayano product photo",
-        "Asics Gel Kayano detail",
-        "Asics Kayano street style"
+    "New Balance 530": [
+        "New Balance 530 silver",
+        "New Balance 530 sneakers",
+        "NB 530 outfit",
+        "New Balance 530 side view",
+        "New Balance 530 on feet",
+        "New Balance 530 close up",
+        "New Balance 530 product photo",
+        "New Balance 530 detail"
     ],
-    "Adidas Spezial": [
-        "Adidas Spezial blue",
-        "Adidas Spezial sneakers",
-        "Adidas Spezial handball",
-        "Adidas Spezial side view",
-        "Adidas Spezial on feet",
-        "Adidas Spezial close up",
-        "Adidas Spezial product",
-        "Adidas Spezial gum sole"
+    "Adidas Forum Low": [
+        "Adidas Forum Low white",
+        "Adidas Forum Low sneakers",
+        "Adidas Forum Low side view",
+        "Adidas Forum Low on feet",
+        "Adidas Forum Low close up",
+        "Adidas Forum Low product photo",
+        "Adidas Forum Low strap detail",
+        "Adidas Forum Low vintage"
     ],
-    "Nike Dunk Low": [
-        "Nike Dunk Low panda",
-        "Nike Dunk Low retro",
-        "Nike Dunk Low sneakers",
-        "Nike Dunk Low side view",
-        "Nike Dunk Low on feet",
-        "Nike Dunk Low close up",
-        "Nike Dunk Low product photo",
-        "Nike Dunk Low detail"
+    "Nike P6000": [
+        "Nike P6000 metallic silver",
+        "Nike P-6000 sneakers",
+        "Nike P6000 running",
+        "Nike P6000 side view",
+        "Nike P6000 on feet",
+        "Nike P6000 close up",
+        "Nike P6000 product photo",
+        "Nike P6000 detail"
     ],
-    "New Balance 2002R": [
-        "New Balance 2002R protection pack",
-        "New Balance 2002R sneakers",
-        "NB 2002R grey",
-        "New Balance 2002R side view",
-        "New Balance 2002R on feet",
-        "New Balance 2002R close up",
-        "New Balance 2002R product",
-        "New Balance 2002R detail"
+    "Jordan 4": [
+        "Air Jordan 4 Bred",
+        "Jordan 4 sneakers",
+        "Jordan 4 side view",
+        "Jordan 4 on feet",
+        "Jordan 4 close up",
+        "Jordan 4 product photo",
+        "Jordan 4 detail",
+        "Air Jordan 4 retro"
+    ],
+    "Asics Gel-NYC": [
+        "Asics Gel NYC sneakers",
+        "Asics Gel NYC cream",
+        "Asics Gel NYC side view",
+        "Asics Gel NYC on feet",
+        "Asics Gel NYC close up",
+        "Asics Gel NYC product photo",
+        "Asics Gel NYC detail",
+        "Asics Gel NYC street style"
     ]
 }
 
@@ -282,13 +324,14 @@ if __name__ == "__main__":
     print("🚀 SCRAPER MULTI-MODÈLES DE SNEAKERS")
     print("="*70)
     print(f"📊 {len(SNEAKER_MODELS)} modèles à scraper")
-    print(f"📦 Total attendu : {len(SNEAKER_MODELS) * 150} images")
+    print(f"🎯 200 images par modèle")
+    print(f"📦 Total attendu : {len(SNEAKER_MODELS) * 200} images")
     print("="*70 + "\n")
     
     # Scraper tous les modèles
     for model_name, search_queries in SNEAKER_MODELS.items():
         try:
-            scrape_model(model_name, search_queries, max_images=150)
+            scrape_model(model_name, search_queries, max_images=200)
             print(f"\n⏳ Pause de 5 secondes avant le prochain modèle...\n")
             time.sleep(5)  # Pause entre modèles pour éviter le blocage
         except Exception as e:
