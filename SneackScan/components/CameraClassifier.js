@@ -9,6 +9,8 @@ import { bundleResourceIO, decodeJpeg } from '@tensorflow/tfjs-react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 
 // 🔗 ADRESSE DE VOTRE SERVEUR VPS
 const API_URL = 'http://51.38.186.253:3000';
@@ -109,29 +111,106 @@ export default function CameraClassifier() {
   };
 
   const pickImage = async () => {
+    if (isProcessing) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        // 👇 CORRECTION : On revient à MediaTypeOptions car votre version le préfère
-        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
+        mediaTypes: 'images',
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.8,
+        quality: 1,
       });
 
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const uri = result.assets[0].uri;
-        
-        const base64 = await FileSystem.readAsStringAsync(uri, {
-          encoding: 'base64', 
-        });
-        
-        await analyzeBase64(base64, uri);
-      }
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const manipulated = await manipulateAsync(
+        asset.uri,
+        [],
+        { compress: 0.9, format: SaveFormat.JPEG, base64: true }
+      );
+
+      if (!manipulated.base64) throw new Error('Conversion JPEG échouée');
+      await analyzeBase64(manipulated.base64, manipulated.uri);
     } catch (error) {
-      console.error("Erreur galerie:", error);
-      Alert.alert("Erreur", "Impossible de lire l'image de la galerie");
+      console.error('Erreur galerie:', error);
+      Alert.alert('Erreur', "Impossible de lire l'image de la galerie");
+      setIsProcessing(false);
     }
   };
+  
+  const analyzeVideo = async (videoUri) => {
+  if (isProcessing) return;
+  if (!model) {
+    Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
+    return;
+  }
+  setIsProcessing(true);
+
+  try {
+    // Génère plusieurs miniatures espacées
+    const frameCount = 10;
+    const thumbs = [];
+    for (let i = 0; i < frameCount; i++) {
+      const time = i * 1000; // toutes les 1s (ajustez selon la durée)
+      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time });
+      thumbs.push(uri);
+    }
+
+    let best = { prob: 0, name: "Inconnu", frameUri: null };
+    for (const uri of thumbs) {
+      // Lire en base64 pour reuse decodeJpeg
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+      const imgBuffer = tf.util.encodeString(base64, 'base64').buffer;
+      const raw = new Uint8Array(imgBuffer);
+      const imageTensor = decodeJpeg(raw);
+      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]);
+      const normalized = resized.div(255.0).expandDims(0);
+      const prediction = await model.predict(normalized);
+      const data = await prediction.data();
+
+      let maxProb = 0;
+      let maxIndex = 0;
+      for (let i = 0; i < data.length; i++) {
+        if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
+      }
+
+      if (maxProb > best.prob) {
+        best = { prob: maxProb, name: OUTPUT_CLASSES[maxIndex] || "Inconnu", frameUri: uri };
+      }
+    }
+
+    // Affiche le meilleur résultat (on peut réutiliser uploadScan si besoin)
+    setScanResult({
+      shoeName: best.name,
+      confidence: best.prob,
+      imageUrl: best.frameUri,
+      marketData: null
+    });
+    setModalVisible(true);
+  } catch (err) {
+    console.error("Erreur vidéo:", err);
+    Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+const pickVideo = async () => {
+  if (isProcessing) return;
+  try {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+      quality: 1
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const videoUri = result.assets[0].uri;
+    await analyzeVideo(videoUri);
+  } catch (error) {
+    console.error('Erreur sélection vidéo:', error);
+    Alert.alert('Erreur', "Impossible de lire la vidéo");
+    setIsProcessing(false);
+  }
+};
 
   const uploadScan = async (uri, shoeName, confidence) => {
     try {
@@ -238,7 +317,9 @@ export default function CameraClassifier() {
             </TouchableOpacity>
           )}
 
-          <View style={{ width: 50 }} /> 
+          <TouchableOpacity onPress={pickVideo} style={styles.galleryButton} disabled={isProcessing}>
+            <Ionicons name="videocam-outline" size={30} color="#fff" />
+          </TouchableOpacity>
         </View>
       </View>
 
