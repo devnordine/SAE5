@@ -179,9 +179,8 @@ function HomeContent() {
   );
 }
 
-// ---------------------------------------------------------
-// COMPOSANT PRINCIPAL INDEX (NAVIGATION)
-// ---------------------------------------------------------
+//Ici la partie du menu
+
 export default function Index() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -203,26 +202,26 @@ export default function Index() {
       const user = JSON.parse(userJson);
       console.log('👤 User data:', user);
 
-      // Vérification admin
+      // Vérif admin
       if (user.role === 'admin') {
-        console.log('✅ Admin détecté via role local');
+        console.log(' Admin détecté via role local');
         setIsAdmin(true);
         setLoading(false);
         return;
       }
 
-      // Double vérification API
+      
       const response = await fetch(`${API_URL}/admin/check/${user.id}`);
       const data = await response.json();
-      console.log('📡 API Admin Check:', data);
+      console.log(' API Admin Check:', data);
 
       if (data.isAdmin === true) {
-        console.log('✅ Admin confirmé par API');
+        console.log(' Admin confirmé par API');
         setIsAdmin(true);
         await AsyncStorage.setItem('user', JSON.stringify({ ...user, role: 'admin' }));
       }
     } catch (error) {
-      console.error('❌ Erreur vérification admin:', error);
+      console.error(' Erreur vérification admin:', error);
     } finally {
       setLoading(false);
     }
@@ -300,9 +299,7 @@ export default function Index() {
   );
 }
 
-// ---------------------------------------------------------
-// STYLES GLOBAUX
-// ---------------------------------------------------------
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
