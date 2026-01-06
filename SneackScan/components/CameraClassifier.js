@@ -5,14 +5,12 @@ import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as tf from '@tensorflow/tfjs';
 import { bundleResourceIO, decodeJpeg } from '@tensorflow/tfjs-react-native';
-// 👇 Import Legacy pour éviter le bug de lecture de fichier
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 
-// 🔗 ADRESSE DE VOTRE SERVEUR VPS
 const API_URL = 'http://51.38.186.253:3000';
 
 const modelJson = require('../assets/model/model.json');
@@ -40,8 +38,7 @@ export default function CameraClassifier() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [model, setModel] = useState(null);
   
-  // États UI
-  const [flashMode, setFlashMode] = useState('off'); // 'off' | 'on'
+  const [flashMode, setFlashMode] = useState('off');
   const [scanResult, setScanResult] = useState(null); 
   const [modalVisible, setModalVisible] = useState(false);
 
@@ -61,7 +58,6 @@ export default function CameraClassifier() {
     })();
   }, []);
 
-  // --- FONCTION D'ANALYSE ---
   const analyzeBase64 = async (base64Data, uriForDisplay) => {
     if (!model) {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
@@ -100,28 +96,28 @@ export default function CameraClassifier() {
   };
 
   const takePicture = async () => {
-  if (!cameraRef.current || isProcessing) return;
-  try {
-    const photo = await cameraRef.current.takePictureAsync({
-      quality: 1,
-      base64: false,
-      skipProcessing: true,
-    });
+    if (!cameraRef.current || isProcessing) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 1,
+        base64: false,
+        skipProcessing: true,
+      });
 
-    // Normalise en JPEG comme la galerie
-    const normalized = await manipulateAsync(
-      photo.uri,
-      [],
-      { compress: 0.9, format: SaveFormat.JPEG, base64: true }
-    );
+      // Rotation de 90° pour corriger l'orientation caméra
+      const normalized = await manipulateAsync(
+        photo.uri,
+        [{ rotate: 90 }],
+        { compress: 0.9, format: SaveFormat.JPEG, base64: true }
+      );
 
-    if (!normalized.base64) throw new Error('Conversion JPEG échouée (caméra)');
-    await analyzeBase64(normalized.base64, normalized.uri);
-  } catch (error) {
-    console.error(error);
-    Alert.alert("Erreur", "Problème avec la caméra");
-  }
-};
+      if (!normalized.base64) throw new Error('Conversion JPEG échouée (caméra)');
+      await analyzeBase64(normalized.base64, normalized.uri);
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Erreur", "Problème avec la caméra");
+    }
+  };
 
   const pickImage = async () => {
     if (isProcessing) return;
@@ -152,77 +148,74 @@ export default function CameraClassifier() {
   };
   
   const analyzeVideo = async (videoUri) => {
-  if (isProcessing) return;
-  if (!model) {
-    Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
-    return;
-  }
-  setIsProcessing(true);
-
-  try {
-    // Génère plusieurs miniatures espacées
-    const frameCount = 10;
-    const thumbs = [];
-    for (let i = 0; i < frameCount; i++) {
-      const time = i * 1000; // toutes les 1s (ajustez selon la durée)
-      const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time });
-      thumbs.push(uri);
+    if (isProcessing) return;
+    if (!model) {
+      Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
+      return;
     }
+    setIsProcessing(true);
 
-    let best = { prob: 0, name: "Inconnu", frameUri: null };
-    for (const uri of thumbs) {
-      // Lire en base64 pour reuse decodeJpeg
-      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-      const imgBuffer = tf.util.encodeString(base64, 'base64').buffer;
-      const raw = new Uint8Array(imgBuffer);
-      const imageTensor = decodeJpeg(raw);
-      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
-      const prediction = await model.predict(resized);
-      const data = await prediction.data();
-
-      let maxProb = 0;
-      let maxIndex = 0;
-      for (let i = 0; i < data.length; i++) {
-        if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
+    try {
+      const frameCount = 10;
+      const thumbs = [];
+      for (let i = 0; i < frameCount; i++) {
+        const time = i * 1000;
+        const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time });
+        thumbs.push(uri);
       }
 
-      if (maxProb > best.prob) {
-        best = { prob: maxProb, name: OUTPUT_CLASSES[maxIndex] || "Inconnu", frameUri: uri };
+      let best = { prob: 0, name: "Inconnu", frameUri: null };
+      for (const uri of thumbs) {
+        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
+        const imgBuffer = tf.util.encodeString(base64, 'base64').buffer;
+        const raw = new Uint8Array(imgBuffer);
+        const imageTensor = decodeJpeg(raw);
+        const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
+        const prediction = await model.predict(resized);
+        const data = await prediction.data();
+
+        let maxProb = 0;
+        let maxIndex = 0;
+        for (let i = 0; i < data.length; i++) {
+          if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
+        }
+
+        if (maxProb > best.prob) {
+          best = { prob: maxProb, name: OUTPUT_CLASSES[maxIndex] || "Inconnu", frameUri: uri };
+        }
       }
+
+      setScanResult({
+        shoeName: best.name,
+        confidence: best.prob,
+        imageUrl: best.frameUri,
+        marketData: null
+      });
+      setModalVisible(true);
+    } catch (err) {
+      console.error("Erreur vidéo:", err);
+      Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
+    } finally {
+      setIsProcessing(false);
     }
+  };
 
-    // Affiche le meilleur résultat (on peut réutiliser uploadScan si besoin)
-    setScanResult({
-      shoeName: best.name,
-      confidence: best.prob,
-      imageUrl: best.frameUri,
-      marketData: null
-    });
-    setModalVisible(true);
-  } catch (err) {
-    console.error("Erreur vidéo:", err);
-    Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
-
-const pickVideo = async () => {
-  if (isProcessing) return;
-  try {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-      quality: 1
-    });
-    if (result.canceled || !result.assets?.length) return;
-    const videoUri = result.assets[0].uri;
-    await analyzeVideo(videoUri);
-  } catch (error) {
-    console.error('Erreur sélection vidéo:', error);
-    Alert.alert('Erreur', "Impossible de lire la vidéo");
-    setIsProcessing(false);
-  }
-};
+  const pickVideo = async () => {
+    if (isProcessing) return;
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        quality: 1
+      });
+      if (result.canceled || !result.assets?.length) return;
+      const videoUri = result.assets[0].uri;
+      await analyzeVideo(videoUri);
+    } catch (error) {
+      console.error('Erreur sélection vidéo:', error);
+      Alert.alert('Erreur', "Impossible de lire la vidéo");
+      setIsProcessing(false);
+    }
+  };
 
   const uploadScan = async (uri, shoeName, confidence) => {
     try {
@@ -268,7 +261,6 @@ const pickVideo = async () => {
     }
   };
 
-  // Fonction pour basculer le flash
   const toggleFlash = () => {
     setFlashMode(prev => prev === 'off' ? 'on' : 'off');
   };
@@ -292,20 +284,16 @@ const pickVideo = async () => {
         style={StyleSheet.absoluteFill} 
         ref={cameraRef} 
         facing="back"
-        flash={flashMode} // ⚡ Le Flash est connecté ici
+        flash={flashMode}
       />
 
-      {/* Interface utilisateur par-dessus la caméra */}
       <View style={styles.overlayContainer}>
         
-        {/* Barre du haut */}
         <View style={styles.topBar}>
-          {/* Bouton Retour */}
           <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
             <Ionicons name="arrow-back" size={28} color="#fff" />
           </TouchableOpacity>
           
-          {/* ⚡ Bouton Flash */}
           <TouchableOpacity onPress={toggleFlash} style={styles.iconButton}>
             <Ionicons 
               name={flashMode === 'on' ? "flash" : "flash-off"} 
@@ -315,7 +303,6 @@ const pickVideo = async () => {
           </TouchableOpacity>
         </View>
 
-        {/* Barre du bas */}
         <View style={styles.bottomBar}>
           <TouchableOpacity onPress={pickImage} style={styles.galleryButton} disabled={isProcessing}>
             <Ionicons name="images-outline" size={30} color="#fff" />
@@ -335,7 +322,6 @@ const pickVideo = async () => {
         </View>
       </View>
 
-      {/* Modal Résultat */}
       <Modal visible={modalVisible} transparent={true} animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
