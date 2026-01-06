@@ -21,10 +21,16 @@ const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
 const modelWeights3 = require('../assets/model/group1-shard3of3.bin');
 
 const OUTPUT_CLASSES = {
-  0: "Adidas_Spezial",
-  1: "Asics_Gel-Kayano",
-  2: "New_Balance_2002R",
-  3: "Nike_Dunk_Low"
+  0: "adidas_forum_low",
+  1: "adidas_spezial",
+  2: "asics_gel-kayano",
+  3: "asics_gel-nyc",
+  4: "jordan_4",
+  5: "new_balance_2002r",
+  6: "new_balance_530",
+  7: "new_balance_550",
+  8: "nike_dunk_low",
+  9: "nike_p6000",
 };
 
 export default function CameraClassifier() {
@@ -68,10 +74,8 @@ export default function CameraClassifier() {
       const imgBuffer = tf.util.encodeString(base64Data, 'base64').buffer;
       const raw = new Uint8Array(imgBuffer);
       const imageTensor = decodeJpeg(raw);
-      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]);
-      const normalized = resized.div(255.0).expandDims(0); 
-      
-      const prediction = await model.predict(normalized);
+      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
+      const prediction = await model.predict(resized);
       const data = await prediction.data();
       
       let maxProb = 0;
@@ -96,19 +100,28 @@ export default function CameraClassifier() {
   };
 
   const takePicture = async () => {
-    if (!cameraRef.current || isProcessing) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 0.8,
-        base64: true,
-        skipProcessing: true,
-      });
-      await analyzeBase64(photo.base64, photo.uri);
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Erreur", "Problème avec la caméra");
-    }
-  };
+  if (!cameraRef.current || isProcessing) return;
+  try {
+    const photo = await cameraRef.current.takePictureAsync({
+      quality: 1,
+      base64: false,
+      skipProcessing: true,
+    });
+
+    // Normalise en JPEG comme la galerie
+    const normalized = await manipulateAsync(
+      photo.uri,
+      [],
+      { compress: 0.9, format: SaveFormat.JPEG, base64: true }
+    );
+
+    if (!normalized.base64) throw new Error('Conversion JPEG échouée (caméra)');
+    await analyzeBase64(normalized.base64, normalized.uri);
+  } catch (error) {
+    console.error(error);
+    Alert.alert("Erreur", "Problème avec la caméra");
+  }
+};
 
   const pickImage = async () => {
     if (isProcessing) return;
@@ -163,9 +176,8 @@ export default function CameraClassifier() {
       const imgBuffer = tf.util.encodeString(base64, 'base64').buffer;
       const raw = new Uint8Array(imgBuffer);
       const imageTensor = decodeJpeg(raw);
-      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]);
-      const normalized = resized.div(255.0).expandDims(0);
-      const prediction = await model.predict(normalized);
+      const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
+      const prediction = await model.predict(resized);
       const data = await prediction.data();
 
       let maxProb = 0;
