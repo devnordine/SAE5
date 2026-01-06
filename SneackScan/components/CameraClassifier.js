@@ -147,7 +147,7 @@ export default function CameraClassifier() {
     }
   };
   
-  const analyzeVideo = async (videoUri) => {
+    const analyzeVideo = async (videoUri) => {
     if (isProcessing) return;
     if (!model) {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
@@ -185,13 +185,11 @@ export default function CameraClassifier() {
         }
       }
 
-      setScanResult({
-        shoeName: best.name,
-        confidence: best.prob,
-        imageUrl: best.frameUri,
-        marketData: null
-      });
-      setModalVisible(true);
+      if (!best.frameUri) {
+        throw new Error("Aucune frame valide extraite de la vidéo.");
+      }
+
+      await uploadScan(best.frameUri, best.name, best.prob);
     } catch (err) {
       console.error("Erreur vidéo:", err);
       Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
