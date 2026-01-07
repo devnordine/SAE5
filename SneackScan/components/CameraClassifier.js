@@ -219,7 +219,14 @@ export default function CameraClassifier() {
     try {
       const userJson = await AsyncStorage.getItem('user');
       const user = userJson ? JSON.parse(userJson) : {};
-      const userId = user.id ?? user.user_id ?? 1;
+      // ⚠️ IMPORTANT : Si l'utilisateur n'est pas connecté, on évite d'envoyer "1" au hasard
+      // car l'ID 1 n'existe peut-être plus après le reset.
+      const userId = user.id || user.user_id; 
+
+      if (!userId) {
+        Alert.alert("Erreur", "Veuillez vous reconnecter.");
+        return;
+      }
 
       const formData = new FormData();
       formData.append('photo', {
@@ -231,14 +238,16 @@ export default function CameraClassifier() {
       formData.append('shoeName', shoeName);
       formData.append('confidence', confidence);
 
+      console.log("🚀 Envoi du scan au serveur...");
+
       const response = await fetch(`${API_URL}/scan`, {
         method: 'POST',
         body: formData,
-        headers: { 'Content-Type': 'multipart/form-data' },
       });
 
       const result = await response.json();
-      
+      console.log("📩 Réponse serveur :", result); // Regarde ce log dans ton terminal Metro !
+
       if (result.success) {
         setScanResult({
           shoeName: shoeName,
@@ -248,12 +257,13 @@ export default function CameraClassifier() {
         });
         setModalVisible(true);
       } else {
-        Alert.alert("Info", "Scan enregistré mais pas de données prix.");
+        // Affiche la vraie erreur renvoyée par le serveur
+        Alert.alert("Erreur Backend", result.error || "Problème inconnu");
       }
 
     } catch (e) {
       console.error("Upload error:", e);
-      Alert.alert("Erreur Serveur", "Vérifiez votre connexion internet");
+      Alert.alert("Erreur Réseau", "Impossible de joindre le serveur VPS.");
     } finally {
       setIsProcessing(false);
     }
