@@ -10,23 +10,20 @@ export default function RootLayout() {
   const router = useRouter();
   const [appIsReady, setAppIsReady] = useState(false);
   const [checkingAuth, setCheckingAuth] = useState(true);
-  
-  // animations Splash 
+
+  // Animations Splash Screen
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.5)).current;
   const scanLineAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    initApp();
-  }, []);
-
-  const initApp = async () => {
-    // animations
+    // 1) Apparition Logo
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
       Animated.spring(scaleAnim, { toValue: 1, friction: 6, tension: 100, useNativeDriver: true }),
     ]).start();
 
+    // 2) Scan Laser
     Animated.loop(
       Animated.sequence([
         Animated.timing(scanLineAnim, { toValue: 1, duration: 1500, useNativeDriver: true }),
@@ -34,25 +31,21 @@ export default function RootLayout() {
       ])
     ).start();
 
-    // vérif auth
-    await checkAuth();
+    // 3) Vérif auth (non bloquant, logs uniquement)
+    checkAuth();
 
-    // fin du splash
-    setTimeout(() => {
-      setAppIsReady(true);
-    }, 2500);
-  };
+    // 4) Fin du splash après 2.5s (comportement du main conservé)
+    const t = setTimeout(() => setAppIsReady(true), 2500);
+    return () => clearTimeout(t);
+  }, []);
 
   const checkAuth = async () => {
     try {
       const userJson = await AsyncStorage.getItem('user');
-      
       if (userJson) {
-        console.log('✅ Utilisateur connecté, redirection vers index');
-        
+        console.log('✅ Utilisateur connecté, redirection possible vers index');
       } else {
-        console.log('❌ Pas d\'utilisateur, redirection vers auth');
-        
+        console.log('❌ Pas d\'utilisateur, redirection possible vers auth');
       }
     } catch (error) {
       console.error('Erreur checkAuth:', error);
@@ -74,7 +67,7 @@ export default function RootLayout() {
   if (!appIsReady) {
     return (
       <View style={styles.splashContainer}>
-        <StatusBar hidden /> 
+        <StatusBar hidden />
         <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }], alignItems: 'center' }}>
           <Text style={styles.logoText}>SNEACKSCAN</Text>
           <Text style={styles.subText}>{"L'IA au bout des pieds"}</Text>
@@ -84,6 +77,7 @@ export default function RootLayout() {
     );
   }
 
+  // Header masqué sur toutes les pages + ajout AdminScreen
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="index" />

@@ -102,7 +102,7 @@ export default function AdminScreen() {
           { data: data.map((d: any) => Number.parseFloat(d.nb_scans)), color: (o=1)=>`rgba(30,144,255,${o})`, strokeWidth: 2 },
           { data: data.map((d: any) => Number.parseFloat(d.score_moyen)), color: (o=1)=>`rgba(46,213,115,${o})`, strokeWidth: 2 },
         ],
-        legend: ['Scans', 'Score IA (%)'],
+        
       });
     } catch (e) { console.error('Erreur evolution:', e); }
   };
@@ -211,30 +211,50 @@ export default function AdminScreen() {
         </View>
       </View>
 
-      {evolutionData && (
+       {evolutionData && (
         <View style={styles.chartPlaceholder}>
           <Text style={styles.chartTitle}>Évolution IA + Score Moyen (30j)</Text>
-          <LineChart
-            data={evolutionData}
-            width={width - 48}
-            height={220}
-            chartConfig={{
-              backgroundColor: '#1a1a1a',
-              backgroundGradientFrom: '#1a1a1a',
-              backgroundGradientTo: '#1a1a1a',
-              decimalPlaces: 0,
-              color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-            }}
-            bezier
-            style={{ borderRadius: 12 }}
-          />
+          
+          
+          <View style={styles.legendContainer}>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#1e90ff' }]} />
+              <Text style={styles.legendText}>Scans</Text>
+            </View>
+            <View style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: '#2ecc71' }]} />
+              <Text style={styles.legendText}>Score IA (%)</Text>
+            </View>
+          </View>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <LineChart
+              data={evolutionData}
+              width={Math.max(width - 48, evolutionData.labels.length * 50)}
+              height={240}
+              chartConfig={{
+                backgroundColor: '#1a1a1a',
+                backgroundGradientFrom: '#1a1a1a',
+                backgroundGradientTo: '#1a1a1a',
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+                propsForDots: {
+                  r: '5',
+                  strokeWidth: '2',
+                  stroke: '#1a1a1a',
+                },
+              }}
+              bezier
+              style={{ borderRadius: 12 }}
+            />
+          </ScrollView>
         </View>
       )}
 
       {activityData && (
         <View style={styles.chartPlaceholder}>
-          <Text style={styles.chartTitle}>Activité par Heure</Text>
+          <Text style={styles.chartTitle}>Activité par Heures</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
             <BarChart
               data={activityData}
@@ -368,5 +388,28 @@ const styles = StyleSheet.create({
     fontSize: 22,           
     fontWeight: 'bold',
     marginTop: 10,
+  },
+  legendContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 24,
+    paddingHorizontal: 8,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  legendDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  legendText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
