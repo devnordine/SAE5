@@ -65,8 +65,8 @@ export default function AdminScreen() {
     if (!response.ok) throw new Error('Accès admin refusé');
     const data = await response.json();
     
-    const scans = parseInt(data.total_scans) || 0;
-    const clicks = parseInt(data.total_clicks) || 0;
+    const scans = Number.parseInt(data.total_scans) || 0;
+    const clicks = Number.parseInt(data.total_clicks) || 0;
     
     setStats({
       total_scans: scans,
@@ -88,7 +88,7 @@ export default function AdminScreen() {
       if (data.length === 0) return;
 
       const avgScore =
-        data.reduce((s: number, d: any) => s + parseFloat(d.score_moyen || 0), 0) /
+        data.reduce((s: number, d: any) => s + Number.parseFloat(d.score_moyen || 0), 0) /
         data.length;
 
       setStats(prev => ({
@@ -99,27 +99,31 @@ export default function AdminScreen() {
       setEvolutionData({
         labels: data.map((d: any) => new Date(d.jour).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short' })),
         datasets: [
-          { data: data.map((d: any) => parseFloat(d.nb_scans)), color: (o=1)=>`rgba(30,144,255,${o})`, strokeWidth: 2 },
-          { data: data.map((d: any) => parseFloat(d.score_moyen)), color: (o=1)=>`rgba(46,213,115,${o})`, strokeWidth: 2 },
+          { data: data.map((d: any) => Number.parseFloat(d.nb_scans)), color: (o=1)=>`rgba(30,144,255,${o})`, strokeWidth: 2 },
+          { data: data.map((d: any) => Number.parseFloat(d.score_moyen)), color: (o=1)=>`rgba(46,213,115,${o})`, strokeWidth: 2 },
         ],
         legend: ['Scans', 'Score IA (%)'],
       });
     } catch (e) { console.error('Erreur evolution:', e); }
   };
 
-  const fetchActivity = async (userId: number) => {
+   const fetchActivity = async (userId: number) => {
     try {
       const response = await fetch(`${API_URL}/admin/stats/activity`, {
         headers: { 'x-user-id': String(userId) },
       });
       if (!response.ok) return;
       const data = await response.json();
-      
       if (data.length === 0) return;
+
       
+      const step = Math.ceil(data.length / 12);
+      const labels = data.map((d: any, i: number) => (i % step === 0 ? `${d.heure}h` : ''));
+
       setActivityData({
-        labels: data.map((d: any) => `${d.heure}h`),
-        datasets: [{ data: data.map((d: any) => parseFloat(d.nb_scans)) }]
+        labels,
+        datasets: [{ data: data.map((d: any) => Number.parseFloat(d.nb_scans)) }],
+        barCount: data.length, 
       });
     } catch (e) { console.error('Erreur activity:', e); }
   };
@@ -131,17 +135,17 @@ export default function AdminScreen() {
       });
       if (!response.ok) return;
       const data = await response.json();
-      
       if (data.length === 0) return;
-      
+
       const colors = ['#1e90ff', '#2ecc71', '#e74c3c', '#f39c12', '#9b59b6'];
       setModelsData(
         data.map((item: any, index: number) => ({
-          name: item.modele_detecter?.substring(0, 15) || 'N/A',
-          population: Number.parseInt(item.nb_scans),
+          
+          name: (item.modele_detecter || 'N/A').replace(/_/g, ' '),
+          population: Number(item.nb_scans),
           color: colors[index % colors.length],
           legendFontColor: '#fff',
-          legendFontSize: 11
+          legendFontSize: 12,
         }))
       );
     } catch (e) { console.error('Erreur models:', e); }
@@ -155,8 +159,8 @@ export default function AdminScreen() {
       if (!response.ok) return;
       const data = await response.json();
       
-      const scans = parseInt(data.total_scans) || 0;
-      const clicks = parseInt(data.total_clicks) || 0;
+      const scans = Number.parseInt(data.total_scans) || 0;
+      const clicks = Number.parseInt(data.total_clicks) || 0;
       const taux = scans > 0 ? ((clicks / scans) * 100).toFixed(1) : 0;
       
       setFunnelData({ scans, clicks, taux });
@@ -231,22 +235,24 @@ export default function AdminScreen() {
       {activityData && (
         <View style={styles.chartPlaceholder}>
           <Text style={styles.chartTitle}>Activité par Heure</Text>
-          <BarChart
-            data={activityData}
-            width={width - 48}
-            height={220}
-            yAxisLabel=""
-            yAxisSuffix=""
-            chartConfig={{
-              backgroundColor: '#1a1a1a',
-              backgroundGradientFrom: '#1a1a1a',
-              backgroundGradientTo: '#1a1a1a',
-              decimalPlaces: 0,
-              color: (opacity = 1) => `rgba(134, 65, 244, ${opacity})`,
-              labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-            }}
-            style={{ borderRadius: 12 }}
-          />
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <BarChart
+              data={activityData}
+              width={Math.max(width - 48, activityData.barCount * 36)} 
+              height={220}
+              yAxisLabel=""
+              yAxisSuffix=""
+              chartConfig={{
+                backgroundColor: '#1a1a1a',
+                backgroundGradientFrom: '#1a1a1a',
+                backgroundGradientTo: '#1a1a1a',
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(134, 65, 244, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
+              }}
+              style={{ borderRadius: 12 }}
+            />
+          </ScrollView>
         </View>
       )}
 
@@ -255,14 +261,15 @@ export default function AdminScreen() {
           <Text style={styles.chartTitle}>Distribution des paires</Text>
           <PieChart
             data={modelsData}
-            width={width - 48}
-            height={220}
+            width={width - 60}           
+            height={200}
             chartConfig={{
               color: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
             }}
             accessor="population"
             backgroundColor="transparent"
-            paddingLeft="15"
+            paddingLeft="0"              // pas de marge à gauche
+            hasLegend={true}
             style={{ borderRadius: 12 }}
           />
         </View>
