@@ -14,7 +14,7 @@ interface HistoryItem {
   shoe_name: string;
   confidence: number;
   image_url: string;
-  date: string;
+  scan_date: string;
   // Nouveaux champs
   lien_achat?: string;
   boutique_nom?: string;
@@ -30,13 +30,20 @@ export default function HistoryScreen() {
     try {
       setLoading(true);
       const userJson = await AsyncStorage.getItem('user');
+      if (!userJson) {
+        console.log("❌ Pas d'utilisateur connecté dans AsyncStorage");
+        return;
+      }
       if (!userJson) return;
+      
       
       const user = JSON.parse(userJson);
       const userId = user.id ?? user.user_id ?? 1;
+      console.log(`🔄 Chargement historique pour User ID: ${userId}...`);
 
       const response = await fetch(`${API_URL}/history/${userId}`);
       const data = await response.json();
+      console.log("📦 Données reçues du serveur :", data.length, "éléments");
 
       if (Array.isArray(data)) {
         // Tri décroissant (plus récent en haut)
@@ -44,8 +51,11 @@ export default function HistoryScreen() {
           new Date(b.date).getTime() - new Date(a.date).getTime()
         );
         setHistory(sorted);
+      }else {
+        console.log("⚠️ Le serveur n'a pas renvoyé un tableau :", data);
       }
     } catch (error) {
+      console.error("❌ Erreur Fetch History:", error);
       console.log(error);
     } finally {
       setLoading(false);
@@ -71,7 +81,7 @@ export default function HistoryScreen() {
     
     let dateStr = "Date inconnue";
     try {
-        const d = new Date(item.date);
+        const d = new Date(item.scan_date);
         dateStr = `${d.toLocaleDateString('fr-FR')} • ${d.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'})}`;
     } catch(e) {}
 

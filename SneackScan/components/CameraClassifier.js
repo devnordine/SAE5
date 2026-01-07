@@ -12,7 +12,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 
 const API_URL = 'http://51.38.186.253:3000';
-const [debugImage, setDebugImage] = useState(null);
+
 
 const modelJson = require('../assets/model/model.json');
 const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
@@ -42,6 +42,7 @@ export default function CameraClassifier() {
   const [flashMode, setFlashMode] = useState('off');
   const [scanResult, setScanResult] = useState(null); 
   const [modalVisible, setModalVisible] = useState(false);
+  const [debugImage, setDebugImage] = useState(null);
 
   useEffect(() => {
     (async () => {
@@ -269,7 +270,7 @@ export default function CameraClassifier() {
       });
 
       const result = await response.json();
-      console.log("📩 Réponse serveur :", result); // Regarde ce log dans ton terminal Metro !
+      console.log("📩 Réponse serveur :", result);
 
       if (result.success) {
         setScanResult({
