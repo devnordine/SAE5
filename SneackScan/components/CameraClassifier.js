@@ -12,6 +12,7 @@ import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 
 const API_URL = 'http://51.38.186.253:3000';
+const [debugImage, setDebugImage] = useState(null);
 
 const modelJson = require('../assets/model/model.json');
 const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
@@ -96,28 +97,50 @@ export default function CameraClassifier() {
   };
 
   const takePicture = async () => {
-    if (!cameraRef.current || isProcessing) return;
-    try {
-      const photo = await cameraRef.current.takePictureAsync({
-        quality: 1,
-        base64: false,
-        skipProcessing: true,
-      });
-
-      // Rotation de 90° pour corriger l'orientation caméra
-      const normalized = await manipulateAsync(
-        photo.uri,
-        [{ rotate: 90 }],
-        { compress: 0.9, format: SaveFormat.JPEG, base64: true }
-      );
-
-      if (!normalized.base64) throw new Error('Conversion JPEG échouée (caméra)');
-      await analyzeBase64(normalized.base64, normalized.uri);
-    } catch (error) {
-      console.error(error);
-      Alert.alert("Erreur", "Problème avec la caméra");
-    }
-  };
+      if (!cameraRef.current || isProcessing) return;
+      try {
+        // 1. On prend la photo SANS toucher au processing pour avoir les bonnes dimensions
+        const photo = await cameraRef.current.takePictureAsync({
+          quality: 0.8, // 1 est inutilement lourd pour de l'IA, 0.8 suffit largement
+          base64: false,
+          skipProcessing: true,
+        });
+  
+        // 2. CALCUL MATHÉMATIQUE DU CARRÉ CENTRAL
+        // On veut le plus grand carré possible au milieu de l'image
+        const width = photo.width;
+        const height = photo.height;
+        const size = Math.min(width, height); // La taille du carré sera le plus petit côté
+  
+        // Calcul du point de départ pour centrer le carré
+        const originX = (width - size) / 2;
+        const originY = (height - size) / 2;
+  
+        // 3. MANIPULATION (CROP + RESIZE)
+        // C'est ici que la magie opère :
+        // - On coupe un carré (plus de distorsion)
+        // - On redimensionne direct en 224x224 (la taille que l'IA aime) -> C'est plus rapide !
+        const normalized = await manipulateAsync(
+          photo.uri,
+          [
+              { crop: { originX, originY, width: size, height: size } },
+              { resize: { width: 224, height: 224 } } 
+              // Note : J'ai enlevé la rotation forcée. Souvent le crop suffit.
+              // Si l'image est encore couchée, remets { rotate: 90 } AVANT le crop.
+          ],
+          { compress: 0.8, format: SaveFormat.JPEG, base64: true }
+        );
+  
+        if (!normalized.base64) throw new Error('Conversion JPEG échouée');
+        
+        // On envoie l'image propre et carrée à l'analyse
+        await analyzeBase64(normalized.base64, normalized.uri);
+  
+      } catch (error) {
+        console.error("Erreur Caméra:", error);
+        Alert.alert("Erreur", "Problème lors de la capture");
+      }
+    };
 
   const pickImage = async () => {
     if (isProcessing) return;
