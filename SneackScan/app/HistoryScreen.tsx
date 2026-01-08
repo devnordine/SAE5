@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, Image, ActivityIndicator, TouchableOpacity, StatusBar, Linking } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Image, ActivityIndicator, TouchableOpacity, StatusBar, Linking, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -72,6 +72,26 @@ export default function HistoryScreen() {
     }
   };
 
+  const handleShare = async (item: HistoryItem) => {
+    try {
+      const name = item.shoe_name ? item.shoe_name.replace(/_/g, ' ') : 'Inconnu';
+      const imageUrl = item.image_url.startsWith('http') 
+        ? item.image_url 
+        : `${API_URL}${item.image_url}`;
+
+      const message = `👟 J'ai scanné cette paire avec SneackScan !\n\n` +
+        `Modèle : ${name}\n` +
+        `Confiance IA : ${Math.round(item.confidence * 100)}%\n` +
+        (item.prix_trouver ? `💰 Prix trouvé : ${item.prix_trouver} €\n` : '') +
+        (item.boutique_nom ? `🏪 Boutique : ${item.boutique_nom}\n` : '') +
+        (item.lien_achat ? `🔗 Lien : ${item.lien_achat}` : '');
+
+      await Share.share({ message, url: imageUrl, title: "Résultat SneackScan" });
+    } catch (error) {
+      console.error("Erreur partage:", error);
+    }
+  };
+
   const renderItem = ({ item }: { item: HistoryItem }) => {
     const imageUrl = item.image_url.startsWith('http') 
       ? item.image_url 
@@ -125,6 +145,9 @@ export default function HistoryScreen() {
               <Ionicons name="calendar-outline" size={14} color="#666" style={{marginRight:5}} />
               <Text style={styles.dateText}>{dateStr}</Text>
             </View>
+            <TouchableOpacity onPress={() => handleShare(item)} style={styles.shareBtn}>
+              <Ionicons name="share-social" size={20} color="#1e90ff" />
+            </TouchableOpacity>
           </View>
         </View>
       </View>
@@ -228,5 +251,6 @@ const styles = StyleSheet.create({
   dateText: { color: '#666', fontSize: 12 },
 
   empty: { alignItems: 'center', marginTop: 100, opacity: 0.6 },
-  emptyText: { color: '#666', marginTop: 15, fontSize: 16 }
+  emptyText: { color: '#666', marginTop: 15, fontSize: 16 },
+  shareBtn: { padding: 5 }
 });

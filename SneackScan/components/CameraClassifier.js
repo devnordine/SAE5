@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Linking } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Linking, Share } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -302,6 +302,26 @@ export default function CameraClassifier() {
     }
   };
 
+  const handleShare = async () => {
+    if (!scanResult) return;
+    try {
+      const message = `👟 J'ai scanné cette paire avec SneackScan !\n\n` +
+        `Modèle : ${scanResult.shoeName?.replace(/_/g, ' ')}\n` +
+        `Confiance IA : ${Math.round(scanResult.confidence * 100)}%\n` +
+        (scanResult.marketData?.prix ? `💰 Prix trouvé : ${scanResult.marketData.prix} €\n` : '') +
+        (scanResult.marketData?.boutique ? `🏪 Boutique : ${scanResult.marketData.boutique}\n` : '') +
+        (scanResult.marketData?.lien ? `🔗 Lien : ${scanResult.marketData.lien}` : '');
+
+      await Share.share({
+        message,
+        url: scanResult.imageUrl,
+        title: "Résultat SneackScan"
+      });
+    } catch (error) {
+      Alert.alert("Erreur", "Impossible de partager.");
+    }
+  };
+
   const toggleFlash = () => setFlashMode(prev => (prev === 'off' ? 'on' : 'off'));
 
   if (!permission) return <View style={styles.center}><ActivityIndicator /></View>;
@@ -376,6 +396,11 @@ export default function CameraClassifier() {
               <Text style={styles.noPrice}>Prix non disponible pour linstant</Text>
             )}
 
+<TouchableOpacity style={styles.shareBtn} onPress={handleShare}>
+              <Ionicons name="share-social" size={20} color="#fff" style={{ marginRight: 8 }} />
+              <Text style={styles.shareBtnText}>Partager</Text>
+            </TouchableOpacity>
+
             <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setScanResult(null); }}>
               <Text style={styles.closeBtnText}>Fermer</Text>
             </TouchableOpacity>
@@ -411,6 +436,8 @@ const styles = StyleSheet.create({
   buyBtn: { backgroundColor: '#4caf50', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
   buyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   noPrice: { color: '#888', fontStyle: 'italic', marginVertical: 20 },
+  shareBtn: { backgroundColor: '#1e90ff', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', marginBottom: 10 },
+  shareBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   closeBtn: { padding: 10 },
   closeBtnText: { color: '#aaa', fontSize: 16, textDecorationLine: 'underline' },
 });

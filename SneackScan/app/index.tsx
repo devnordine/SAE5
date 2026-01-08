@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, StatusBar, ScrollView, RefreshControl, Image, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, StatusBar, ScrollView, RefreshControl, Image, Dimensions, Share } from 'react-native';
 import { Link, useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -75,6 +75,26 @@ function HomeContent() {
   const handleLogout = async () => {
     await AsyncStorage.removeItem('user');
     router.replace('/AuthScreen');
+  };
+
+  const handleShare = async (item: any) => {
+    try {
+      const name = item.shoe_name ? item.shoe_name.replace(/_/g, ' ') : 'Inconnu';
+      const imageUrl = item.image_url 
+        ? (item.image_url.startsWith('http') ? item.image_url : `${API_URL}${item.image_url}`)
+        : null;
+
+      const message = `👟 J'ai scanné cette paire avec SneackScan !\n\n` +
+        `Modèle : ${name}\n` +
+        `Confiance IA : ${item.confidence ? (Number(item.confidence) * 100).toFixed(0) : 0}%\n` +
+        (item.prix_trouver ? `💰 Prix trouvé : ${item.prix_trouver} €\n` : '') +
+        (item.boutique_nom ? `🏪 Boutique : ${item.boutique_nom}\n` : '') +
+        (item.lien_achat ? `🔗 Lien : ${item.lien_achat}` : '');
+
+      await Share.share({ message, url: imageUrl || undefined, title: "Résultat SneackScan" });
+    } catch (error) {
+      console.error("Erreur partage:", error);
+    }
   };
 
   if (loading) {
@@ -167,7 +187,12 @@ function HomeContent() {
                   <Text style={styles.activityTitle}>{name}</Text>
                   <Text style={styles.activitySub}>Fiabilité : {conf}%</Text>
                 </View>
-                <Text style={styles.dateText}>{dateStr}</Text>
+                <View style={{alignItems: 'flex-end'}}>
+                  <Text style={styles.dateText}>{dateStr}</Text>
+                  <TouchableOpacity onPress={() => handleShare(item)} style={{marginTop: 8, padding: 4}}>
+                    <Ionicons name="share-social-outline" size={22} color="#1e90ff" />
+                  </TouchableOpacity>
+                </View>
               </View>
             );
           })
