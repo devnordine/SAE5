@@ -3,15 +3,21 @@ import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, StatusBar,
 import { Link, useRouter, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-// 🔗 VOTRE VPS
+
+import CameraScreen from './CameraScreen';
+import HistoryScreen from './HistoryScreen';
+import AdminScreen from './AdminScreen';
+
+const Tab = createBottomTabNavigator();
 const API_URL = 'http://51.38.186.253:3000';
 const { width } = Dimensions.get('window');
 
-export default function HomeScreen() {
+
+function HomeContent() {
   const router = useRouter();
   
-  // États
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userName, setUserName] = useState('');
@@ -21,7 +27,6 @@ export default function HomeScreen() {
     recentActivity: any[];
   }>({ totalScans: 0, recentActivity: [] });
 
-  // --- 1. CHARGEMENT DES DONNÉES ---
   const loadData = useCallback(async () => {
     try {
       const userJson = await AsyncStorage.getItem('user');
@@ -41,7 +46,6 @@ export default function HomeScreen() {
       const history = await response.json();
 
       if (Array.isArray(history)) {
-        // Tri par date
         const sorted = history.sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime());
         setDashboardData({
           totalScans: history.length,
@@ -90,7 +94,6 @@ export default function HomeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#1e90ff" />}
         showsVerticalScrollIndicator={false}
       >
-        {/* --- HEADER (Avec marge de sécurité) --- */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Bonjour,</Text>
@@ -101,7 +104,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* --- BOUTON SCAN --- */}
         <Link href="/CameraScreen" asChild>
           <TouchableOpacity style={styles.scanCard}>
             <View style={styles.scanIconBg}>
@@ -115,7 +117,6 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </Link>
 
-        {/* --- STATISTIQUES --- */}
         <Text style={styles.sectionTitle}>VOTRE COLLECTION</Text>
         
         <View style={styles.statsCard}>
@@ -126,7 +127,6 @@ export default function HomeScreen() {
           <MaterialCommunityIcons name="shoe-sneaker" size={50} color="#1e90ff" style={{opacity:0.8}} />
         </View>
 
-        {/* --- HISTORIQUE --- */}
         <View style={{flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginTop: 10, marginBottom: 10}}>
             <Text style={styles.sectionTitle}>ACTIVITÉ RÉCENTE</Text>
             <TouchableOpacity onPress={() => router.push('/HistoryScreen')}>
@@ -149,7 +149,6 @@ export default function HomeScreen() {
             try {
                 if (item.date) {
                     const d = new Date(item.date);
-                    // Format court : "03 déc."
                     dateStr = d.toLocaleDateString('fr-FR', {day:'numeric', month:'short'});
                 }
             } catch(e) {}
@@ -180,24 +179,141 @@ export default function HomeScreen() {
   );
 }
 
+//Ici la partie du menu
+
+export default function Index() {
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      checkAdmin();
+    }, [])
+  );
+
+  const checkAdmin = async () => {
+    try {
+      const userJson = await AsyncStorage.getItem('user');
+      if (!userJson) {
+        setLoading(false);
+        return;
+      }
+
+      const user = JSON.parse(userJson);
+      console.log('👤 User data:', user);
+
+      // Vérif admin
+      if (user.role === 'admin') {
+        console.log(' Admin détecté via role local');
+        setIsAdmin(true);
+        setLoading(false);
+        return;
+      }
+
+      
+      const response = await fetch(`${API_URL}/admin/check/${user.id}`);
+      const data = await response.json();
+      console.log(' API Admin Check:', data);
+
+      if (data.isAdmin === true) {
+        console.log(' Admin confirmé par API');
+        setIsAdmin(true);
+        await AsyncStorage.setItem('user', JSON.stringify({ ...user, role: 'admin' }));
+      }
+    } catch (error) {
+      console.error(' Erreur vérification admin:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color="#1e90ff" />
+      </View>
+    );
+  }
+
+  return (
+    <Tab.Navigator
+      screenOptions={{
+        headerShown: false,
+        tabBarActiveTintColor: '#1e90ff',
+        tabBarInactiveTintColor: '#666',
+        tabBarStyle: {
+          backgroundColor: '#121212',
+          borderTopColor: '#333',
+          borderTopWidth: 1,
+          height: 60,
+          paddingBottom: 8,
+        },
+      }}
+    >
+      <Tab.Screen
+        name="home"
+        component={HomeContent} 
+        options={{
+          title: 'Accueil',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="home" size={size} color={color} />
+          ),
+        }}
+      />
+      
+      <Tab.Screen
+        name="camera"
+        component={CameraScreen}
+        options={{
+          title: 'Scanner',
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="camera-iris" size={size} color={color} />
+          ),
+        }}
+      />
+      
+      <Tab.Screen
+        name="history"
+        component={HistoryScreen}
+        options={{
+          title: 'Historique',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="time" size={size} color={color} />
+          ),
+        }}
+      />
+
+      {isAdmin && (
+        <Tab.Screen
+          name="admin"
+          component={AdminScreen}
+          options={{
+            title: 'Admin',
+            tabBarIcon: ({ color, size }) => (
+              <Ionicons name="settings" size={size} color={color} />
+            ),
+          }}
+        />
+      )}
+    </Tab.Navigator>
+  );
+}
+
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#121212' },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' },
   scrollContent: { padding: 20 },
-
-  // --- HEADER CORRIGÉ ---
   header: { 
     flexDirection: 'row', 
     justifyContent: 'space-between', 
     alignItems: 'center', 
-    marginTop: 60, // 👈 C'est ça qui fait descendre tout le contenu sous l'encoche
+    marginTop: 60,
     marginBottom: 40 
   },
   greeting: { color: '#888', fontSize: 16 },
-  username: { color: '#fff', fontSize: 28, fontWeight: 'bold' }, // Un peu plus gros
+  username: { color: '#fff', fontSize: 28, fontWeight: 'bold' },
   logoutBtn: { padding: 12, backgroundColor: 'rgba(255,69,0,0.1)', borderRadius: 14 },
-
-  // Scan Card
   scanCard: {
     backgroundColor: '#1e1e1e', borderRadius: 20, padding: 20, flexDirection: 'row', alignItems: 'center', marginBottom: 35,
     borderWidth: 1, borderColor: '#333', elevation: 5, shadowColor: '#000', shadowOffset: {width:0, height:4}, shadowOpacity:0.3, shadowRadius:5,
@@ -205,19 +321,13 @@ const styles = StyleSheet.create({
   scanIconBg: { width: 60, height: 60, backgroundColor: '#1e90ff', borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginRight: 15 },
   scanTitle: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
   scanSubtitle: { color: '#888', fontSize: 14, marginTop: 2 },
-
-  // Titres
   sectionTitle: { color: '#666', fontSize: 13, fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: 1 },
-
-  // Stats Card
   statsCard: {
     backgroundColor: '#1a1a1a', borderRadius: 20, padding: 25, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     borderLeftWidth: 4, borderLeftColor: '#1e90ff', marginBottom: 30, marginTop: 15
   },
   statsLabel: { color: '#aaa', fontSize: 14, marginTop: 5 },
   statsCount: { color: '#fff', fontSize: 42, fontWeight: 'bold' },
-
-  // Liste Activité
   activityItem: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', padding: 15, borderRadius: 16, marginBottom: 12,
     borderWidth: 1, borderColor: '#2a2a2a'
@@ -226,7 +336,6 @@ const styles = StyleSheet.create({
   activityTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   activitySub: { color: '#1e90ff', fontSize: 13, marginTop: 4, fontWeight:'600' },
   dateText: { color: '#555', fontSize: 13, fontWeight:'bold' },
-
   emptyState: { alignItems: 'center', padding: 30, opacity: 0.7 },
   emptyText: { color: '#666', fontSize: 14, marginTop: 10 }
 });

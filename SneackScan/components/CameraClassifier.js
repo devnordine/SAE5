@@ -13,7 +13,6 @@ import * as VideoThumbnails from 'expo-video-thumbnails';
 
 const API_URL = 'http://51.38.186.253:3000';
 
-
 const modelJson = require('../assets/model/model.json');
 const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
 const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
@@ -38,22 +37,21 @@ export default function CameraClassifier() {
   const cameraRef = useRef(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [model, setModel] = useState(null);
-  
   const [flashMode, setFlashMode] = useState('off');
-  const [scanResult, setScanResult] = useState(null); 
+  const [scanResult, setScanResult] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [debugImage, setDebugImage] = useState(null);
+  const [currentUserId, setCurrentUserId] = useState(null);
+  const [lastScanMeta, setLastScanMeta] = useState({ shoeName: '', prix: 0, confidence: 0 });
 
   useEffect(() => {
     (async () => {
       await tf.ready();
-      console.log("TF Ready");
       try {
         const loadedModel = await tf.loadGraphModel(
           bundleResourceIO(modelJson, [modelWeights1, modelWeights2, modelWeights3])
         );
         setModel(loadedModel);
-        console.log("Model Loaded");
       } catch (err) {
         console.error("Error loading model", err);
       }
@@ -65,9 +63,7 @@ export default function CameraClassifier() {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
       return;
     }
-    
     setIsProcessing(true);
-
     try {
       const imgBuffer = tf.util.encodeString(base64Data, 'base64').buffer;
       const raw = new Uint8Array(imgBuffer);
@@ -75,21 +71,16 @@ export default function CameraClassifier() {
       const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
       const prediction = await model.predict(resized);
       const data = await prediction.data();
-      
-      let maxProb = 0;
-      let maxIndex = 0;
+
+      let maxProb = 0, maxIndex = 0;
       for (let i = 0; i < data.length; i++) {
-        if (data[i] > maxProb) {
-          maxProb = data[i];
-          maxIndex = i;
-        }
+        if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
       }
 
       const shoeName = OUTPUT_CLASSES[maxIndex] || "Inconnu";
       console.log(`IA Prediction: ${shoeName} (${(maxProb * 100).toFixed(1)}%)`);
 
       await uploadScan(uriForDisplay, shoeName, maxProb);
-
     } catch (error) {
       console.error(error);
       Alert.alert("Erreur Analyse", "Impossible d'analyser l'image.");
@@ -98,61 +89,46 @@ export default function CameraClassifier() {
   };
 
   const takePicture = async () => {
-      if (!cameraRef.current || isProcessing) return;
-      try {
-        // 1. On prend la photo SANS toucher au processing pour avoir les bonnes dimensions
-        const photo = await cameraRef.current.takePictureAsync({
-          quality: 0.8, // 1 est inutilement lourd pour de l'IA, 0.8 suffit largement
-          base64: false,
-          skipProcessing: true,
-        });
-  
-        // 2. CALCUL MATHÉMATIQUE DU CARRÉ CENTRAL
-        // On veut le plus grand carré possible au milieu de l'image
-        const width = photo.width;
-        const height = photo.height;
-        const size = Math.min(width, height); // La taille du carré sera le plus petit côté
-  
-        // Calcul du point de départ pour centrer le carré
-        const originX = (width - size) / 2;
-        const originY = (height - size) / 2;
-  
-        // 3. MANIPULATION (CROP + RESIZE)
-        // C'est ici que la magie opère :
-        // - On coupe un carré (plus de distorsion)
-        // - On redimensionne direct en 224x224 (la taille que l'IA aime) -> C'est plus rapide !
-        const normalized = await manipulateAsync(
-          photo.uri,
-          [
-              { crop: { originX, originY, width: size, height: size } },
-              { resize: { width: 224, height: 224 } } 
-              // Note : J'ai enlevé la rotation forcée. Souvent le crop suffit.
-              // Si l'image est encore couchée, remets { rotate: 90 } AVANT le crop.
-          ],
-          { compress: 0.8, format: SaveFormat.JPEG, base64: true }
-        );
-  
-        if (!normalized.base64) throw new Error('Conversion JPEG échouée');
-        
-        // On envoie l'image propre et carrée à l'analyse
-        await analyzeBase64(normalized.base64, normalized.uri);
-  
-      } catch (error) {
-        console.error("Erreur Caméra:", error);
-        Alert.alert("Erreur", "Problème lors de la capture");
-      }
-    };
+    if (!cameraRef.current || isProcessing) return;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        base64: false,
+        skipProcessing: true,
+      });
+
+      const width = photo.width;
+      const height = photo.height;
+      const size = Math.min(width, height);
+      const originX = (width - size) / 2;
+      const originY = (height - size) / 2;
+
+      const normalized = await manipulateAsync(
+        photo.uri,
+        [
+          { crop: { originX, originY, width: size, height: size } },
+          { resize: { width: 224, height: 224 } }
+        ],
+        { compress: 0.8, format: SaveFormat.JPEG, base64: true }
+      );
+
+      if (!normalized.base64) throw new Error('Conversion JPEG échouée');
+      await analyzeBase64(normalized.base64, normalized.uri);
+    } catch (error) {
+      console.error("Erreur Caméra:", error);
+      Alert.alert("Erreur", "Problème lors de la capture");
+    }
+  };
 
   const pickImage = async () => {
     if (isProcessing) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: 'images',
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
         quality: 1,
       });
-
       if (result.canceled || !result.assets?.length) return;
 
       const asset = result.assets[0];
@@ -161,7 +137,6 @@ export default function CameraClassifier() {
         [],
         { compress: 0.9, format: SaveFormat.JPEG, base64: true }
       );
-
       if (!manipulated.base64) throw new Error('Conversion JPEG échouée');
       await analyzeBase64(manipulated.base64, manipulated.uri);
     } catch (error) {
@@ -170,15 +145,14 @@ export default function CameraClassifier() {
       setIsProcessing(false);
     }
   };
-  
-    const analyzeVideo = async (videoUri) => {
+
+  const analyzeVideo = async (videoUri) => {
     if (isProcessing) return;
     if (!model) {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
       return;
     }
     setIsProcessing(true);
-
     try {
       const frameCount = 10;
       const thumbs = [];
@@ -198,26 +172,20 @@ export default function CameraClassifier() {
         const prediction = await model.predict(resized);
         const data = await prediction.data();
 
-        let maxProb = 0;
-        let maxIndex = 0;
+        let maxProb = 0, maxIndex = 0;
         for (let i = 0; i < data.length; i++) {
           if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
         }
-
         if (maxProb > best.prob) {
           best = { prob: maxProb, name: OUTPUT_CLASSES[maxIndex] || "Inconnu", frameUri: uri };
         }
       }
 
-      if (!best.frameUri) {
-        throw new Error("Aucune frame valide extraite de la vidéo.");
-      }
-
+      if (!best.frameUri) throw new Error("Aucune frame valide extraite de la vidéo.");
       await uploadScan(best.frameUri, best.name, best.prob);
     } catch (err) {
       console.error("Erreur vidéo:", err);
       Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
-    } finally {
       setIsProcessing(false);
     }
   };
@@ -227,11 +195,10 @@ export default function CameraClassifier() {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        quality: 1
+        quality: 1,
       });
       if (result.canceled || !result.assets?.length) return;
-      const videoUri = result.assets[0].uri;
-      await analyzeVideo(videoUri);
+      await analyzeVideo(result.assets[0].uri);
     } catch (error) {
       console.error('Erreur sélection vidéo:', error);
       Alert.alert('Erreur', "Impossible de lire la vidéo");
@@ -243,21 +210,17 @@ export default function CameraClassifier() {
     try {
       const userJson = await AsyncStorage.getItem('user');
       const user = userJson ? JSON.parse(userJson) : {};
-      // ⚠️ IMPORTANT : Si l'utilisateur n'est pas connecté, on évite d'envoyer "1" au hasard
-      // car l'ID 1 n'existe peut-être plus après le reset.
-      const userId = user.id || user.user_id; 
+      const userId = user.id || user.user_id;
 
       if (!userId) {
         Alert.alert("Erreur", "Veuillez vous reconnecter.");
+        setIsProcessing(false);
         return;
       }
+      setCurrentUserId(userId);
 
       const formData = new FormData();
-      formData.append('photo', {
-        uri: uri,
-        type: 'image/jpeg',
-        name: 'scan.jpg',
-      });
+      formData.append('photo', { uri, type: 'image/jpeg', name: 'scan.jpg' });
       formData.append('userId', userId);
       formData.append('shoeName', shoeName);
       formData.append('confidence', confidence);
@@ -276,15 +239,21 @@ export default function CameraClassifier() {
         setScanResult({
           shoeName: shoeName,
           confidence: confidence,
-          imageUrl: uri, 
+          imageUrl: uri,
           marketData: result.marketData
         });
         setModalVisible(true);
+
+        setLastScanMeta({
+          shoeName,
+          prix: result.marketData?.prix || 0,
+          confidence,
+        });
+
+        await recordStats(userId, shoeName, result.marketData?.prix || 0, confidence, false);
       } else {
-        // Affiche la vraie erreur renvoyée par le serveur
         Alert.alert("Erreur Backend", result.error || "Problème inconnu");
       }
-
     } catch (e) {
       console.error("Upload error:", e);
       Alert.alert("Erreur Réseau", "Impossible de joindre le serveur VPS.");
@@ -293,17 +262,55 @@ export default function CameraClassifier() {
     }
   };
 
-  const toggleFlash = () => {
-    setFlashMode(prev => prev === 'off' ? 'on' : 'off');
+  const recordStats = async (userId, shoeName, prix, confidence, aCliquerAchat = false) => {
+    try {
+      const statsRes = await fetch(`${API_URL}/stats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id_users: userId,
+          modele_detecter: shoeName,
+          prix_afficher: prix,
+          a_cliquer_achat: aCliquerAchat,
+          score_confiance: Number.parseFloat(confidence),
+        }),
+      });
+      if (!statsRes.ok) {
+        console.error('Erreur enregistrement stats:', await statsRes.text());
+      }
+    } catch (error) {
+      console.error('Erreur recordStats:', error);
+    }
   };
+
+  const handleBuyClick = async () => {
+    try {
+      if (currentUserId && lastScanMeta.shoeName) {
+        await recordStats(
+          currentUserId,
+          lastScanMeta.shoeName,
+          lastScanMeta.prix,
+          lastScanMeta.confidence,
+          true
+        );
+      }
+    } catch (e) {
+      console.error('Erreur stats achat:', e);
+    }
+    if (scanResult?.marketData?.lien) {
+      Linking.openURL(scanResult.marketData.lien);
+    }
+  };
+
+  const toggleFlash = () => setFlashMode(prev => (prev === 'off' ? 'on' : 'off'));
 
   if (!permission) return <View style={styles.center}><ActivityIndicator /></View>;
   if (!permission.granted) {
     return (
       <View style={styles.center}>
-        <Text style={{color:'white', marginBottom:20}}>Permission caméra requise</Text>
+        <Text style={{ color: 'white', marginBottom: 20 }}>Permission caméra requise</Text>
         <TouchableOpacity onPress={requestPermission} style={styles.btnPermission}>
-            <Text style={styles.btnText}>Donner permission</Text>
+          <Text style={styles.btnText}>Donner permission</Text>
         </TouchableOpacity>
       </View>
     );
@@ -311,27 +318,15 @@ export default function CameraClassifier() {
 
   return (
     <View style={{ flex: 1, backgroundColor: 'black' }}>
-      
-      <CameraView 
-        style={StyleSheet.absoluteFill} 
-        ref={cameraRef} 
-        facing="back"
-        flash={flashMode}
-      />
+      <CameraView style={StyleSheet.absoluteFill} ref={cameraRef} facing="back" flash={flashMode} />
 
       <View style={styles.overlayContainer}>
-        
         <View style={styles.topBar}>
           <TouchableOpacity onPress={() => router.back()} style={styles.iconButton}>
             <Ionicons name="arrow-back" size={28} color="#fff" />
           </TouchableOpacity>
-          
           <TouchableOpacity onPress={toggleFlash} style={styles.iconButton}>
-            <Ionicons 
-              name={flashMode === 'on' ? "flash" : "flash-off"} 
-              size={28} 
-              color={flashMode === 'on' ? "#FFD700" : "#fff"} 
-            />
+            <Ionicons name={flashMode === 'on' ? 'flash' : 'flash-off'} size={28} color={flashMode === 'on' ? '#FFD700' : '#fff'} />
           </TouchableOpacity>
         </View>
 
@@ -354,15 +349,14 @@ export default function CameraClassifier() {
         </View>
       </View>
 
-      <Modal visible={modalVisible} transparent={true} animationType="slide">
+      <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            
             <Image source={{ uri: scanResult?.imageUrl }} style={styles.modalImage} />
             <Text style={styles.modalTitle}>{scanResult?.shoeName?.replace(/_/g, ' ')}</Text>
-            
+
             <View style={styles.confBadge}>
-                <Text style={styles.modalConf}>Confiance IA : {Math.round(scanResult?.confidence * 100)}%</Text>
+              <Text style={styles.modalConf}>Confiance IA : {Math.round(scanResult?.confidence * 100)}%</Text>
             </View>
 
             {scanResult?.marketData?.prix > 0 ? (
@@ -370,21 +364,21 @@ export default function CameraClassifier() {
                 <Text style={styles.priceLabel}>Meilleure offre trouvée :</Text>
                 <Text style={styles.priceValue}>{scanResult.marketData.prix} €</Text>
                 <Text style={styles.shopName}>sur {scanResult.marketData.boutique}</Text>
+
                 {scanResult.marketData.lien ? (
-                    <TouchableOpacity style={styles.buyBtn} onPress={() => Linking.openURL(scanResult.marketData.lien)}>
+                  <TouchableOpacity style={styles.buyBtn} onPress={handleBuyClick}>
                     <Text style={styles.buyBtnText}>ACHETER MAINTENANT</Text>
-                    <Ionicons name="cart" size={20} color="white" style={{marginLeft:8}} />
-                    </TouchableOpacity>
+                    <Ionicons name="cart" size={20} color="white" style={{ marginLeft: 8 }} />
+                  </TouchableOpacity>
                 ) : null}
               </View>
             ) : (
-              <Text style={styles.noPrice}>Prix non disponible pour l'instant</Text>
+              <Text style={styles.noPrice}>Prix non disponible pour linstant</Text>
             )}
 
             <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setScanResult(null); }}>
               <Text style={styles.closeBtnText}>Fermer</Text>
             </TouchableOpacity>
-
           </View>
         </View>
       </Modal>
@@ -396,24 +390,19 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' },
   btnPermission: { backgroundColor: '#1e90ff', padding: 15, borderRadius: 10 },
   btnText: { color: 'white', fontWeight: 'bold' },
-  
   overlayContainer: { flex: 1, justifyContent: 'space-between', paddingVertical: 50, paddingHorizontal: 20 },
-  
   topBar: { flexDirection: 'row', justifyContent: 'space-between' },
   iconButton: { padding: 10, backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 25 },
-  
   bottomBar: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
   galleryButton: { padding: 15, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 30 },
-  
   scanBtn: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.3)', justifyContent: 'center', alignItems: 'center', borderWidth: 4, borderColor: '#fff' },
   scanInner: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#fff' },
   loader: { marginBottom: 20 },
-  
   modalContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.85)' },
   modalContent: { width: '85%', backgroundColor: '#1a1a1a', borderRadius: 20, padding: 20, alignItems: 'center', borderWidth: 1, borderColor: '#333' },
-  modalImage: { width: 220, height: 220, borderRadius: 15, marginBottom: 15, borderWidth:1, borderColor:'#333' },
+  modalImage: { width: 220, height: 220, borderRadius: 15, marginBottom: 15, borderWidth: 1, borderColor: '#333' },
   modalTitle: { color: '#fff', fontSize: 24, fontWeight: '900', textAlign: 'center', marginBottom: 5 },
-  confBadge: { backgroundColor: '#333', paddingHorizontal: 10, paddingVertical:5, borderRadius: 8, marginBottom: 20 },
+  confBadge: { backgroundColor: '#333', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, marginBottom: 20 },
   modalConf: { color: '#1e90ff', fontSize: 14, fontWeight: 'bold' },
   priceBox: { width: '100%', backgroundColor: '#252525', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 20, borderLeftWidth: 4, borderLeftColor: '#4caf50' },
   priceLabel: { color: '#aaa', fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
@@ -423,5 +412,5 @@ const styles = StyleSheet.create({
   buyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   noPrice: { color: '#888', fontStyle: 'italic', marginVertical: 20 },
   closeBtn: { padding: 10 },
-  closeBtnText: { color: '#aaa', fontSize: 16, textDecorationLine: 'underline' }
+  closeBtnText: { color: '#aaa', fontSize: 16, textDecorationLine: 'underline' },
 });

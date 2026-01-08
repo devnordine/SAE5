@@ -15,7 +15,6 @@ import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
-// 👇 TRES IMPORTANT : Mettez l'IP de votre VPS ici (pas localhost !)
 const API_URL = 'http://51.38.186.253:3000';
 
 export default function AuthScreen() {
@@ -23,7 +22,6 @@ export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
 
-  // Champs du formulaire
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -38,14 +36,12 @@ export default function AuthScreen() {
 
     setLoading(true);
     const endpoint = isLogin ? '/login' : '/register';
-    
-    // Préparation des données
     const payload = isLogin 
       ? { username, password }
       : { username, email, password, nom, prenom };
 
     try {
-      console.log(`Tentative de connexion vers : ${API_URL}${endpoint}`);
+      console.log(`📡 Tentative vers : ${API_URL}${endpoint}`);
       
       const response = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
@@ -54,26 +50,54 @@ export default function AuthScreen() {
       });
 
       const data = await response.json();
+      console.log('📦 Réponse serveur:', data);
 
       if (response.ok && data.success) {
-        // Sauvegarde de l'utilisateur dans le téléphone
-        await AsyncStorage.setItem('user', JSON.stringify({
+        // Vérification admin
+        let userRole = 'user';
+        try {
+          const checkRes = await fetch(`${API_URL}/admin/check/${data.id}`);
+          const check = await checkRes.json();
+          console.log(' Admin check:', check);
+          if (check.isAdmin === true) {
+            userRole = 'admin';
+            console.log('Utilisateur est ADMIN');
+          }
+        } catch (e) {
+          console.log('Admin non checker:', e);
+        }
+
+        // Sauvegarde utilisateur
+        const userData = {
           id: data.id,
           username: username,
-          prenom: data.prenom || prenom // On garde le prénom pour l'accueil
-        }));
+          prenom: data.prenom || prenom,
+          role: userRole
+        };
+
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        console.log('💾 User sauvegardé:', userData);
         
-        Alert.alert("Succès", isLogin ? "Connexion réussie !" : "Compte créé avec succès !");
-        router.replace('/'); // Redirection vers l'accueil
+        Alert.alert(
+          "Succès", 
+          isLogin ? "Connexion réussie !" : "Compte créé avec succès !",
+          [{
+            text: "OK",
+            onPress: () => {
+              console.log('🚀 Redirection vers index (qui affiche les tabs)');
+              router.replace('/');
+            }
+          }]
+        );
       } else {
         Alert.alert("Erreur", data.message || data.error || "Une erreur est survenue.");
       }
 
     } catch (error: any) {
-      console.error("Erreur Auth:", error);
+      console.error("❌ Erreur Auth:", error);
       Alert.alert(
         "Erreur Réseau", 
-        "Impossible de joindre le serveur. Vérifiez votre connexion internet."
+        "Impossible de joindre le serveur. Vérifiez votre connexion."
       );
     } finally {
       setLoading(false);
@@ -95,7 +119,6 @@ export default function AuthScreen() {
         </View>
 
         <View style={styles.form}>
-          {/* Nom & Prénom (Inscription uniquement) */}
           {!isLogin && (
             <View style={styles.row}>
               <View style={[styles.inputContainer, { flex: 1, marginRight: 5 }]}>
@@ -121,7 +144,6 @@ export default function AuthScreen() {
             </View>
           )}
 
-          {/* Email (Inscription uniquement) */}
           {!isLogin && (
             <View style={styles.inputContainer}>
               <Ionicons name="mail-outline" size={20} color="#666" style={styles.icon} />
@@ -137,7 +159,6 @@ export default function AuthScreen() {
             </View>
           )}
 
-          {/* Username */}
           <View style={styles.inputContainer}>
             <Ionicons name="person-circle-outline" size={20} color="#666" style={styles.icon} />
             <TextInput 
@@ -150,7 +171,6 @@ export default function AuthScreen() {
             />
           </View>
 
-          {/* Mot de passe */}
           <View style={styles.inputContainer}>
             <Ionicons name="lock-closed-outline" size={20} color="#666" style={styles.icon} />
             <TextInput 
