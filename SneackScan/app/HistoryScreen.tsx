@@ -84,9 +84,10 @@ export default function HistoryScreen() {
         `Confiance IA : ${Math.round(item.confidence * 100)}%\n` +
         (item.prix_trouver ? `💰 Prix trouvé : ${item.prix_trouver} €\n` : '') +
         (item.boutique_nom ? `🏪 Boutique : ${item.boutique_nom}\n` : '') +
-        (item.lien_achat ? `🔗 Lien : ${item.lien_achat}` : '');
+        (item.lien_achat ? `🔗 Lien : ${item.lien_achat}\n` : '') +
+        `\n🖼️ Photo : ${imageUrl}`;
 
-      await Share.share({ message, url: imageUrl, title: "Résultat SneackScan" });
+        await Share.share({ message, title: "Résultat SneackScan" });
     } catch (error) {
       console.error("Erreur partage:", error);
     }
