@@ -10,13 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as VideoThumbnails from 'expo-video-thumbnails';
+import { loadModelFromDB } from '../utils/ModelHandler';
 
 const API_URL = 'http://51.38.186.253:3000';
-
-const modelJson = require('../assets/model/model.json');
-const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
-const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
-const modelWeights3 = require('../assets/model/group1-shard3of3.bin');
 
 const OUTPUT_CLASSES = {
   0: "adidas_forum_low",
@@ -43,20 +39,34 @@ export default function CameraClassifier() {
   const [debugImage, setDebugImage] = useState(null);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [lastScanMeta, setLastScanMeta] = useState({ shoeName: '', prix: 0, confidence: 0 });
+  const [isModelReady, setIsModelReady] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState('Initialisation...');
 
-  useEffect(() => {
-    (async () => {
-      await tf.ready();
-      try {
-        const loadedModel = await tf.loadGraphModel(
-          bundleResourceIO(modelJson, [modelWeights1, modelWeights2, modelWeights3])
-        );
+useEffect(() => {
+  let isMounted = true;
+
+  const initModel = async () => {
+    try {
+      // On appelle notre nouvelle fonction
+      const loadedModel = await loadModelFromDB((status) => {
+          if(isMounted) setLoadingStatus(status);
+      });
+      
+      if (isMounted) {
         setModel(loadedModel);
-      } catch (err) {
-        console.error("Error loading model", err);
+        setIsModelReady(true);
+        setLoadingStatus('Prêt à scanner');
       }
-    })();
-  }, []);
+    } catch (err) {
+      console.error("Erreur fatale initModel:", err);
+      if(isMounted) setLoadingStatus('Erreur chargement');
+    }
+  };
+
+  initModel();
+
+  return () => { isMounted = false; };
+}, []);
 
   const analyzeBase64 = async (base64Data, uriForDisplay) => {
     if (!model) {
