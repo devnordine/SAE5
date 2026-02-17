@@ -1,18 +1,23 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Linking, Share } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, ActivityIndicator, Alert, Modal, Linking, TextInput } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import * as ImagePicker from 'expo-image-picker';
+import * as ImagePicker from 'expo-image-picker'; // Correction MediaType ici
 import * as tf from '@tensorflow/tfjs';
 import { bundleResourceIO, decodeJpeg } from '@tensorflow/tfjs-react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
-import * as VideoThumbnails from 'expo-video-thumbnails';
-import { loadModelFromDB } from '../utils/ModelHandler';
 
+// ⚠️ Assurez-vous que cette IP est bien celle de votre VPS ou de votre machine locale
 const API_URL = 'http://51.38.186.253:3000';
+
+// Chargement des fichiers modèles
+const modelJson = require('../assets/model/model.json');
+const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
+const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
+const modelWeights3 = require('../assets/model/group1-shard3of3.bin');
 
 const OUTPUT_CLASSES = {
   0: "adidas_forum_low",
@@ -31,43 +36,41 @@ export default function CameraClassifier() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const cameraRef = useRef(null);
+  
+  // États
   const [isProcessing, setIsProcessing] = useState(false);
   const [model, setModel] = useState(null);
   const [flashMode, setFlashMode] = useState('off');
+  
+  // Résultats et Modale
   const [scanResult, setScanResult] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
-  const [debugImage, setDebugImage] = useState(null);
+  
+  // Logique Active Learning (< 60%)
+  const [isManualInputMode, setIsManualInputMode] = useState(false);
+  const [manualShoeName, setManualShoeName] = useState('');
+  const [currentPrediction, setCurrentPrediction] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null);
+
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [lastScanMeta, setLastScanMeta] = useState({ shoeName: '', prix: 0, confidence: 0 });
-  const [isModelReady, setIsModelReady] = useState(false);
-  const [loadingStatus, setLoadingStatus] = useState('Initialisation...');
 
-useEffect(() => {
-  let isMounted = true;
-
-  const initModel = async () => {
-    try {
-      // On appelle notre nouvelle fonction
-      const loadedModel = await loadModelFromDB((status) => {
-          if(isMounted) setLoadingStatus(status);
-      });
-      
-      if (isMounted) {
+  // 1. Chargement du modèle TensorFlow
+  useEffect(() => {
+    (async () => {
+      await tf.ready();
+      try {
+        const loadedModel = await tf.loadGraphModel(
+          bundleResourceIO(modelJson, [modelWeights1, modelWeights2, modelWeights3])
+        );
         setModel(loadedModel);
-        setIsModelReady(true);
-        setLoadingStatus('Prêt à scanner');
+        console.log("Modèle chargé !");
+      } catch (err) {
+        console.error("Error loading model", err);
       }
-    } catch (err) {
-      console.error("Erreur fatale initModel:", err);
-      if(isMounted) setLoadingStatus('Erreur chargement');
-    }
-  };
+    })();
+  }, []);
 
-  initModel();
-
-  return () => { isMounted = false; };
-}, []);
-
+  // 2. Analyse de l'image
   const analyzeBase64 = async (base64Data, uriForDisplay) => {
     if (!model) {
       Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
@@ -90,7 +93,19 @@ useEffect(() => {
       const shoeName = OUTPUT_CLASSES[maxIndex] || "Inconnu";
       console.log(`IA Prediction: ${shoeName} (${(maxProb * 100).toFixed(1)}%)`);
 
-      await uploadScan(uriForDisplay, shoeName, maxProb);
+      if (maxProb < 0.60) {
+        // Confiance Faible : Mode Manuel
+        setCapturedImage(uriForDisplay);
+        setCurrentPrediction({ score: maxProb, rawName: shoeName });
+        setManualShoeName(shoeName);
+        setIsManualInputMode(true);
+        setModalVisible(true);
+        setIsProcessing(false);
+      } else {
+        // Confiance Forte : Envoi Direct
+        await uploadScan(uriForDisplay, shoeName, maxProb);
+      }
+
     } catch (error) {
       console.error(error);
       Alert.alert("Erreur Analyse", "Impossible d'analyser l'image.");
@@ -98,6 +113,7 @@ useEffect(() => {
     }
   };
 
+  // 3. Prendre la photo
   const takePicture = async () => {
     if (!cameraRef.current || isProcessing) return;
     try {
@@ -107,6 +123,7 @@ useEffect(() => {
         skipProcessing: true,
       });
 
+      // Crop carré
       const width = photo.width;
       const height = photo.height;
       const size = Math.min(width, height);
@@ -127,14 +144,16 @@ useEffect(() => {
     } catch (error) {
       console.error("Erreur Caméra:", error);
       Alert.alert("Erreur", "Problème lors de la capture");
+      setIsProcessing(false);
     }
   };
 
+  // 4. Galerie (CORRIGÉ ICI)
   const pickImage = async () => {
     if (isProcessing) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, 
         allowsEditing: true,
         aspect: [1, 1],
         quality: 1,
@@ -151,73 +170,15 @@ useEffect(() => {
       await analyzeBase64(manipulated.base64, manipulated.uri);
     } catch (error) {
       console.error('Erreur galerie:', error);
-      Alert.alert('Erreur', "Impossible de lire l'image de la galerie");
+      Alert.alert('Erreur', "Impossible de lire l'image");
       setIsProcessing(false);
     }
   };
 
-  const analyzeVideo = async (videoUri) => {
-    if (isProcessing) return;
-    if (!model) {
-      Alert.alert("Patience", "Le modèle IA est en cours de chargement...");
-      return;
-    }
-    setIsProcessing(true);
-    try {
-      const frameCount = 10;
-      const thumbs = [];
-      for (let i = 0; i < frameCount; i++) {
-        const time = i * 1000;
-        const { uri } = await VideoThumbnails.getThumbnailAsync(videoUri, { time });
-        thumbs.push(uri);
-      }
-
-      let best = { prob: 0, name: "Inconnu", frameUri: null };
-      for (const uri of thumbs) {
-        const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' });
-        const imgBuffer = tf.util.encodeString(base64, 'base64').buffer;
-        const raw = new Uint8Array(imgBuffer);
-        const imageTensor = decodeJpeg(raw);
-        const resized = tf.image.resizeBilinear(imageTensor, [224, 224]).expandDims(0);
-        const prediction = await model.predict(resized);
-        const data = await prediction.data();
-
-        let maxProb = 0, maxIndex = 0;
-        for (let i = 0; i < data.length; i++) {
-          if (data[i] > maxProb) { maxProb = data[i]; maxIndex = i; }
-        }
-        if (maxProb > best.prob) {
-          best = { prob: maxProb, name: OUTPUT_CLASSES[maxIndex] || "Inconnu", frameUri: uri };
-        }
-      }
-
-      if (!best.frameUri) throw new Error("Aucune frame valide extraite de la vidéo.");
-      await uploadScan(best.frameUri, best.name, best.prob);
-    } catch (err) {
-      console.error("Erreur vidéo:", err);
-      Alert.alert("Erreur", "Impossible d'analyser la vidéo.");
-      setIsProcessing(false);
-    }
-  };
-
-  const pickVideo = async () => {
-    if (isProcessing) return;
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        quality: 1,
-      });
-      if (result.canceled || !result.assets?.length) return;
-      await analyzeVideo(result.assets[0].uri);
-    } catch (error) {
-      console.error('Erreur sélection vidéo:', error);
-      Alert.alert('Erreur', "Impossible de lire la vidéo");
-      setIsProcessing(false);
-    }
-  };
-
+  // 5. Envoi au serveur
   const uploadScan = async (uri, shoeName, confidence) => {
     try {
+      setIsProcessing(true);
       const userJson = await AsyncStorage.getItem('user');
       const user = userJson ? JSON.parse(userJson) : {};
       const userId = user.id || user.user_id;
@@ -230,106 +191,60 @@ useEffect(() => {
       setCurrentUserId(userId);
 
       const formData = new FormData();
-      formData.append('photo', { uri, type: 'image/jpeg', name: 'scan.jpg' });
-      formData.append('userId', userId);
-      formData.append('shoeName', shoeName);
-      formData.append('confidence', confidence);
+      formData.append('image', { uri, type: 'image/jpeg', name: 'scan.jpg' });
+      formData.append('user_id', userId);
+      formData.append('shoe_name', shoeName);
+      formData.append('confidence', confidence.toString());
+      formData.append('boutique_nom', 'Recherche...'); 
+      formData.append('prix_trouver', '0'); 
 
-      console.log("🚀 Envoi du scan au serveur...");
+      console.log(`🚀 Envoi du scan : ${shoeName} (${confidence})`);
 
-      const response = await fetch(`${API_URL}/scan`, {
+      const response = await fetch(`${API_URL}/api/scan-result`, {
         method: 'POST',
         body: formData,
+        headers: {
+            'Content-Type': 'multipart/form-data',
+        },
       });
 
-      const result = await response.json();
-      console.log("📩 Réponse serveur :", result);
+      // C'est ici que ça plante si le serveur renvoie du HTML (404/500)
+      const textResponse = await response.text(); 
+      try {
+          const result = JSON.parse(textResponse);
+          console.log("📩 Réponse serveur :", result);
 
-      if (result.success) {
-        setScanResult({
-          shoeName: shoeName,
-          confidence: confidence,
-          imageUrl: uri,
-          marketData: result.marketData
-        });
-        setModalVisible(true);
-
-        setLastScanMeta({
-          shoeName,
-          prix: result.marketData?.prix || 0,
-          confidence,
-        });
-
-        await recordStats(userId, shoeName, result.marketData?.prix || 0, confidence, false);
-      } else {
-        Alert.alert("Erreur Backend", result.error || "Problème inconnu");
+          if (result.success) {
+            setScanResult({
+              shoeName: shoeName,
+              confidence: confidence,
+              imageUrl: uri,
+              marketData: result.marketData || { prix: 0, boutique: "Inconnu", lien: null }
+            });
+            setIsManualInputMode(false);
+            setModalVisible(true);
+          } else {
+            Alert.alert("Erreur Backend", result.error || "Problème inconnu");
+          }
+      } catch (jsonError) {
+          console.error("Erreur JSON. Réponse brute du serveur :", textResponse);
+          Alert.alert("Erreur Serveur", "Le serveur a renvoyé une erreur (Voir logs).");
       }
+
     } catch (e) {
       console.error("Upload error:", e);
-      Alert.alert("Erreur Réseau", "Impossible de joindre le serveur VPS.");
+      Alert.alert("Erreur Réseau", "Impossible de joindre le serveur.");
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const recordStats = async (userId, shoeName, prix, confidence, aCliquerAchat = false) => {
-    try {
-      const statsRes = await fetch(`${API_URL}/stats`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id_users: userId,
-          modele_detecter: shoeName,
-          prix_afficher: prix,
-          a_cliquer_achat: aCliquerAchat,
-          score_confiance: Number.parseFloat(confidence),
-        }),
-      });
-      if (!statsRes.ok) {
-        console.error('Erreur enregistrement stats:', await statsRes.text());
-      }
-    } catch (error) {
-      console.error('Erreur recordStats:', error);
+  const handleManualSubmit = async () => {
+    if (!manualShoeName.trim()) {
+        Alert.alert("Attention", "Veuillez entrer un nom.");
+        return;
     }
-  };
-
-  const handleBuyClick = async () => {
-    try {
-      if (currentUserId && lastScanMeta.shoeName) {
-        await recordStats(
-          currentUserId,
-          lastScanMeta.shoeName,
-          lastScanMeta.prix,
-          lastScanMeta.confidence,
-          true
-        );
-      }
-    } catch (e) {
-      console.error('Erreur stats achat:', e);
-    }
-    if (scanResult?.marketData?.lien) {
-      Linking.openURL(scanResult.marketData.lien);
-    }
-  };
-
-  const handleShare = async () => {
-    if (!scanResult) return;
-    try {
-      const message = `👟 J'ai scanné cette paire avec SneackScan !\n\n` +
-        `Modèle : ${scanResult.shoeName?.replace(/_/g, ' ')}\n` +
-        `Confiance IA : ${Math.round(scanResult.confidence * 100)}%\n` +
-        (scanResult.marketData?.prix ? `💰 Prix trouvé : ${scanResult.marketData.prix} €\n` : '') +
-        (scanResult.marketData?.boutique ? `🏪 Boutique : ${scanResult.marketData.boutique}\n` : '') +
-        (scanResult.marketData?.lien ? `🔗 Lien : ${scanResult.marketData.lien}` : '');
-
-      await Share.share({
-        message,
-        url: scanResult.imageUrl,
-        title: "Résultat SneackScan"
-      });
-    } catch (error) {
-      Alert.alert("Erreur", "Impossible de partager.");
-    }
+    await uploadScan(capturedImage, manualShoeName, currentPrediction.score);
   };
 
   const toggleFlash = () => setFlashMode(prev => (prev === 'off' ? 'on' : 'off'));
@@ -373,47 +288,68 @@ useEffect(() => {
             </TouchableOpacity>
           )}
 
-          <TouchableOpacity onPress={pickVideo} style={styles.galleryButton} disabled={isProcessing}>
-            <Ionicons name="videocam-outline" size={30} color="#fff" />
-          </TouchableOpacity>
+          <View style={{width: 50}} /> 
         </View>
       </View>
 
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
-            <Image source={{ uri: scanResult?.imageUrl }} style={styles.modalImage} />
-            <Text style={styles.modalTitle}>{scanResult?.shoeName?.replace(/_/g, ' ')}</Text>
+            
+            <Image 
+                source={{ uri: isManualInputMode ? capturedImage : scanResult?.imageUrl }} 
+                style={styles.modalImage} 
+            />
 
-            <View style={styles.confBadge}>
-              <Text style={styles.modalConf}>Confiance IA : {Math.round(scanResult?.confidence * 100)}%</Text>
-            </View>
-
-            {scanResult?.marketData?.prix > 0 ? (
-              <View style={styles.priceBox}>
-                <Text style={styles.priceLabel}>Meilleure offre trouvée :</Text>
-                <Text style={styles.priceValue}>{scanResult.marketData.prix} €</Text>
-                <Text style={styles.shopName}>sur {scanResult.marketData.boutique}</Text>
-
-                {scanResult.marketData.lien ? (
-                  <TouchableOpacity style={styles.buyBtn} onPress={handleBuyClick}>
-                    <Text style={styles.buyBtnText}>ACHETER MAINTENANT</Text>
-                    <Ionicons name="cart" size={20} color="white" style={{ marginLeft: 8 }} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
+            {isManualInputMode ? (
+                <>
+                    <Text style={styles.modalTitle}>L IA a un doute 🤔</Text>
+                    <View style={styles.confBadge}>
+                        <Text style={[styles.modalConf, {color: 'orange'}]}>
+                            Confiance faible : {Math.round(currentPrediction?.score * 100)}%
+                        </Text>
+                    </View>
+                    <Text style={{color:'#ccc', marginBottom:10}}>Aidez-nous à identifier cette paire :</Text>
+                    <TextInput
+                        style={styles.inputField}
+                        placeholder="Ex: Nike Dunk Low Panda"
+                        placeholderTextColor="#666"
+                        value={manualShoeName}
+                        onChangeText={setManualShoeName}
+                    />
+                    <TouchableOpacity style={styles.buyBtn} onPress={handleManualSubmit}>
+                        <Text style={styles.buyBtnText}>VALIDER ET ENVOYER</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setIsManualInputMode(false); }}>
+                        <Text style={styles.closeBtnText}>Annuler</Text>
+                    </TouchableOpacity>
+                </>
             ) : (
-              <Text style={styles.noPrice}>Prix non disponible pour linstant</Text>
+                <>
+                    <Text style={styles.modalTitle}>{scanResult?.shoeName?.replace(/_/g, ' ')}</Text>
+                    <View style={styles.confBadge}>
+                    <Text style={styles.modalConf}>Confiance IA : {Math.round(scanResult?.confidence * 100)}%</Text>
+                    </View>
+                    {scanResult?.marketData?.prix > 0 ? (
+                    <View style={styles.priceBox}>
+                        <Text style={styles.priceLabel}>Meilleure offre trouvée :</Text>
+                        <Text style={styles.priceValue}>{scanResult.marketData.prix} €</Text>
+                        <Text style={styles.shopName}>sur {scanResult.marketData.boutique}</Text>
+                        {scanResult.marketData.lien && (
+                        <TouchableOpacity style={styles.buyBtn} onPress={() => Linking.openURL(scanResult.marketData.lien)}>
+                            <Text style={styles.buyBtnText}>ACHETER MAINTENANT</Text>
+                            <Ionicons name="cart" size={20} color="white" style={{ marginLeft: 8 }} />
+                        </TouchableOpacity>
+                        )}
+                    </View>
+                    ) : (
+                    <Text style={styles.noPrice}>Scan enregistré sur le Drive.</Text>
+                    )}
+                    <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setScanResult(null); }}>
+                    <Text style={styles.closeBtnText}>Fermer</Text>
+                    </TouchableOpacity>
+                </>
             )}
-
-<TouchableOpacity style={styles.shareBtn} onPress={handleShare}>
-              <Ionicons name="share-social" size={20} color="#fff" style={{ marginRight: 8 }} />
-              <Text style={styles.shareBtnText}>Partager</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.closeBtn} onPress={() => { setModalVisible(false); setScanResult(null); }}>
-              <Text style={styles.closeBtnText}>Fermer</Text>
-            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -446,8 +382,7 @@ const styles = StyleSheet.create({
   buyBtn: { backgroundColor: '#4caf50', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
   buyBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   noPrice: { color: '#888', fontStyle: 'italic', marginVertical: 20 },
-  shareBtn: { backgroundColor: '#1e90ff', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 10, width: '100%', alignItems: 'center', flexDirection: 'row', justifyContent: 'center', marginBottom: 10 },
-  shareBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
   closeBtn: { padding: 10 },
   closeBtnText: { color: '#aaa', fontSize: 16, textDecorationLine: 'underline' },
+  inputField: { width: '100%', height: 50, backgroundColor: '#333', borderRadius: 10, color: 'white', paddingHorizontal: 15, fontSize: 16, marginBottom: 20, borderWidth: 1, borderColor: '#555' }
 });

@@ -21,6 +21,7 @@ function HomeContent() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [userName, setUserName] = useState('');
+  const [isAdmin, setIsAdmin] = useState(false);
   
   const [dashboardData, setDashboardData] = useState<{
     totalScans: number;
@@ -36,6 +37,10 @@ function HomeContent() {
       }
       
       const user = JSON.parse(userJson);
+      // Vérification si Admin
+if (user.role === 'admin') {
+  setIsAdmin(true);
+}
       setUserName(user.prenom || 'Sneakerhead');
       const userId = user.id || user.user_id || 1;
 
@@ -124,6 +129,24 @@ function HomeContent() {
             <Ionicons name="log-out-outline" size={24} color="#ff4500" />
           </TouchableOpacity>
         </View>
+
+        {/* --- BOUTON ADMIN (Visible uniquement si Admin) --- */}
+        {isAdmin && (
+          <Link href="/AdminReviewScreen" asChild>
+            <TouchableOpacity style={styles.adminReviewCard}>
+              <View style={styles.adminIconBg}>
+                <Ionicons name="flash" size={24} color="#000" />
+              </View>
+              <View style={{flex:1}}>
+                <Text style={styles.adminTitle}>Admin Review</Text>
+                <Text style={styles.adminSubtitle}>Valider les scans incertains</Text>
+              </View>
+              <View style={styles.notifBadge}>
+                <Ionicons name="alert" size={16} color="white" />
+              </View>
+            </TouchableOpacity>
+          </Link>
+        )}
 
         <Link href="/CameraScreen" asChild>
           <TouchableOpacity style={styles.scanCard}>
@@ -363,5 +386,51 @@ const styles = StyleSheet.create({
   activitySub: { color: '#1e90ff', fontSize: 13, marginTop: 4, fontWeight:'600' },
   dateText: { color: '#555', fontSize: 13, fontWeight:'bold' },
   emptyState: { alignItems: 'center', padding: 30, opacity: 0.7 },
-  emptyText: { color: '#666', fontSize: 14, marginTop: 10 }
+  emptyText: { color: '#666', fontSize: 14, marginTop: 10 },
+  // --- NOUVEAU STYLE ADMIN (Dark & Sleek) ---
+  adminReviewCard: {
+    backgroundColor: '#1e1e1e', // Même fond sombre que les autres cartes
+    borderRadius: 20,
+    padding: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#333', // Bordure subtile pour la définition
+    elevation: 5,
+    shadowColor: '#000', 
+    shadowOffset: {width:0, height:4}, 
+    shadowOpacity:0.3, 
+    shadowRadius:5,
+  },
+  adminIconBg: {
+    width: 50, 
+    height: 50, 
+    backgroundColor: 'rgba(142, 68, 173, 0.15)', // Violet très léger et transparent
+    borderRadius: 25,
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    marginRight: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(142, 68, 173, 0.5)' // Cercle violet fin
+  },
+  adminTitle: { 
+    color: '#fff', // Texte blanc comme le reste
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  adminSubtitle: { 
+    color: '#888', // Sous-titre gris discret
+    fontSize: 13, 
+    marginTop: 2 
+  },
+  notifBadge: { 
+    width: 24, 
+    height: 24, 
+    backgroundColor: '#ff4444', // La pastille rouge reste pour l'alerte
+    borderRadius: 12, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+    marginLeft: 'auto' // Pousse la notif tout à droite
+  },
 });

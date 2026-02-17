@@ -1,9 +1,8 @@
-import { documentDirectory, getInfoAsync, makeDirectoryAsync, downloadAsync } from 'expo-file-system';
+import { documentDirectory, getInfoAsync, makeDirectoryAsync, downloadAsync } from 'expo-file-system/legacy';
 import * as tf from '@tensorflow/tfjs';
 import { bundleResourceIO } from '@tensorflow/tfjs-react-native';
 
-// ⚠️ REMPLACEZ PAR L'IP DE VOTRE PC (ex: 192.168.1.15)
-// Si vous êtes sur émulateur Android, utilisez 10.0.2.2
+
 const API_URL = 'http://51.38.186.253:3000'; 
 
 // On utilise directement la constante importée
