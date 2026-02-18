@@ -6,7 +6,6 @@ const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const axios = require('axios');
-const { google } = require('googleapis');
 
 const app = express();
 app.use(cors());
@@ -117,85 +116,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// ==========================================
-// ☁️ CONFIGURATION GOOGLE DRIVE (VERSION INTELLIGENTE)
-// ==========================================
 
-// Remplace par l'ID de ton dossier parent "DATASET_SNEAKSCAN"
-const DRIVE_PARENT_FOLDER_ID = 'TON_ID_DE_DOSSIER_ICI'; 
-
-const auth = new google.auth.GoogleAuth({
-  keyFile: './google-drive-key.json',
-  scopes: ['https://www.googleapis.com/auth/drive'], // Scope un peu plus large pour gérer les dossiers
-});
-const drive = google.drive({ version: 'v3', auth });
-
-// Fonction 1 : Chercher ou Créer le dossier de la paire
-async function getOrCreateFolder(folderName, parentId) {
-  try {
-    // On cherche si un dossier avec ce nom existe déjà dans le parent
-    // Note : On échappe les guillemets simples dans le nom pour éviter les bugs
-    const safeName = folderName.replace(/'/g, "\\'");
-    const query = `mimeType='application/vnd.google-apps.folder' and name='${safeName}' and '${parentId}' in parents and trashed=false`;
-    
-    const res = await drive.files.list({
-      q: query,
-      fields: 'files(id, name)',
-      spaces: 'drive',
-    });
-
-    if (res.data.files.length > 0) {
-      // Le dossier existe, on retourne son ID
-      return res.data.files[0].id;
-    } else {
-      // Le dossier n'existe pas, on le crée
-      console.log(`📂 Création du dossier Drive pour : ${folderName}`);
-      const fileMetadata = {
-        name: folderName,
-        mimeType: 'application/vnd.google-apps.folder',
-        parents: [parentId],
-      };
-      const file = await drive.files.create({
-        resource: fileMetadata,
-        fields: 'id',
-      });
-      return file.data.id;
-    }
-  } catch (err) {
-    console.error("Erreur gestion dossier Drive:", err);
-    throw err;
-  }
-}
-
-// Fonction 2 : Upload l'image dans le bon sous-dossier
-async function uploadToDrive(filePath, fileName, shoeName) {
-  try {
-    // Étape A : Récupérer l'ID du sous-dossier (ex: ID du dossier "Nike Dunk Low")
-    const folderId = await getOrCreateFolder(shoeName, DRIVE_PARENT_FOLDER_ID);
-    
-    // Étape B : Upload l'image dedans
-    const fileMetadata = {
-      name: fileName,
-      parents: [folderId], // <--- On met l'ID du sous-dossier ici !
-    };
-    
-    const media = {
-      mimeType: 'image/jpeg',
-      body: fs.createReadStream(filePath),
-    };
-
-    const response = await drive.files.create({
-      resource: fileMetadata,
-      media: media,
-      fields: 'id',
-    });
-    
-    return response.data.id;
-  } catch (error) {
-    console.error('Erreur Upload Drive:', error);
-    throw error;
-  }
-}
 
 // Middleware Admin
 const verifyAdmin = async (req, res, next) => {
@@ -375,6 +296,23 @@ app.get('/api/model/:filename', async (req, res) => {
   }
 });
 
+// --- Route pour vérifier la version du modèle ---
+app.get('/api/model-version', async (req, res) => {
+  try {
+    // On prend la date de création du model.json
+    const result = await pool.query(
+      "SELECT created_at FROM ai_models WHERE filename = 'model.json'"
+    );
+    if (result.rows.length > 0) {
+      res.json({ version: result.rows[0].created_at });
+    } else {
+      res.json({ version: null });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Erreur serveur" });
+  }
+});
+
 // ==========================================
 // 🚀 ROUTES UTILISATEURS (Compatibles Frontend)
 // ==========================================
@@ -446,22 +384,23 @@ app.post('/stats', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ROUTE HISTORY : Renvoie du texte (via JOIN) pour que le frontend comprenne
+// ROUTE HISTORY : Corrigée pour exclure les scans refusés
 app.get('/history/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
     const query = `
         SELECT 
-            h.id, h.confidence, h.image_url, h.lien_achat, h.boutique_nom, h.prix_trouver, h.scan_date,
-            s.model_name AS shoe_name 
-        FROM history h
-        LEFT JOIN sneakers s ON h.sneaker_id = s.id
-        WHERE h.user_id = $1 
-        ORDER BY h.scan_date DESC
+            id, confidence, image_url, lien_achat, boutique_nom, prix_trouver, scan_date, shoe_name, status
+        FROM history
+        WHERE user_id = $1 AND status != 'refuser'
+        ORDER BY scan_date DESC
     `;
     const result = await pool.query(query, [userId]);
     res.json(result.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { 
+    console.error("Erreur History:", e);
+    res.status(500).json({ error: e.message }); 
+  }
 });
 
 
@@ -485,24 +424,24 @@ app.post('/api/scan-result', upload.single('image'), async (req, res) => {
 
   try {
     if (isHighConfidence) {
-      console.log(`🚀 Confiance ${score} (>0.6). Envoi Drive...`);
+      console.log(`🚀 Confiance ${score} (>0.6). Sauvegarde dans le dataset local...`);
       const cleanName = shoe_name.replace(/\s+/g, '_').toLowerCase();
-      const driveFileName = `${cleanName}_${Date.now()}.jpg`;
+      const datasetDir = path.join(__dirname, 'uploads', 'dataset', cleanName);
+      
+      if (!fs.existsSync(datasetDir)) fs.mkdirSync(datasetDir, { recursive: true });
 
-      try {
-        const driveId = await uploadToDrive(file.path, driveFileName, shoe_name);
-        fs.unlink(file.path, (e) => { if(e) console.error(e); });
-        storedImageUrl = `drive:${driveId}`;
-      } catch (driveErr) {
-        console.error("Échec upload Drive, conservation locale:", driveErr);
-      }
+      const newFileName = `${cleanName}_${Date.now()}.jpg`;
+      const newFilePath = path.join(datasetDir, newFileName);
+      
+      fs.renameSync(file.path, newFilePath);
+      storedImageUrl = `/uploads/dataset/${cleanName}/${newFileName}`;
     } else {
       console.log(`⚠️ Confiance ${score} (<0.6). Mise en attente locale.`);
     }
 
     // --- CORRECTION ICI : on utilise 'date' au lieu de 'scan_date' ---
     await pool.query(
-      `INSERT INTO history (user_id, shoe_name, confidence, image_url, boutique_nom, prix_trouver, status, date) 
+      `INSERT INTO history (user_id, shoe_name, confidence, image_url, boutique_nom, prix_trouver, status, scan_date) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
       [user_id || 1, shoe_name, score, storedImageUrl, boutique_nom, prix_trouver, status]
     );
@@ -531,23 +470,28 @@ app.post('/api/admin/validate-scan', async (req, res) => {
     if (scan.status === 'en attente' && scan.image_url.startsWith('/uploads/')) {
         const localFilePath = path.join(__dirname, scan.image_url);
 
-        if (fs.existsSync(localFilePath)) {
-            console.log(`👨‍⚖️ Validation : Déplacement vers Drive/${corrected_name}...`);
-
+if (fs.existsSync(localFilePath)) {
             const cleanName = corrected_name.replace(/\s+/g, '_').toLowerCase();
-            const driveFileName = `${cleanName}_validated_${Date.now()}.jpg`;
-
-            // Ici aussi, on utilise le nom corrigé pour trouver/créer le bon dossier
-            const driveId = await uploadToDrive(localFilePath, driveFileName, corrected_name);
-
-            fs.unlinkSync(localFilePath);
+            const datasetDir = path.join(__dirname, 'uploads', 'dataset', cleanName);
             
+            if (!fs.existsSync(datasetDir)) fs.mkdirSync(datasetDir, { recursive: true });
+
+            const newFileName = `${cleanName}_${Date.now()}.jpg`;
+            const newFilePath = path.join(datasetDir, newFileName);
+
+            console.log(`👨‍⚖️ Validation : Déplacement vers le dataset local -> ${newFilePath}`);
+            
+            // On déplace l'image
+            fs.renameSync(localFilePath, newFilePath);
+            
+            // On met à jour la BDD
+            const newDbUrl = `/uploads/dataset/${cleanName}/${newFileName}`;
             await pool.query(
                 `UPDATE history SET status = 'validé', shoe_name = $1, image_url = $2 WHERE id = $3`,
-                [corrected_name, `drive:${driveId}`, history_id]
+                [corrected_name, newDbUrl, history_id]
             );
 
-            res.json({ success: true, message: "Validé et classé sur Drive" });
+            res.json({ success: true, message: "Validé et classé dans le dataset du VPS" });
         } else {
             res.status(404).send("Fichier introuvable");
         }
@@ -560,7 +504,100 @@ app.post('/api/admin/validate-scan', async (req, res) => {
   }
 });
 
+// ==========================================
+// 👮 ROUTES ADMIN (TINDER STYLE)
+// ==========================================
 
+// 1. Récupérer tous les scans en attente
+app.get('/api/admin/pending', async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT * FROM history WHERE status = 'en attente' ORDER BY scan_date DESC"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erreur récupération pending" });
+  }
+});
+
+// 2. Rejeter un scan (Supprimer l'image ou marquer comme refusé)
+app.post('/api/admin/reject-scan', async (req, res) => {
+  const { history_id } = req.body;
+  try {
+    // Option A : On supprime tout (si c'est du spam)
+    // Option B : On marque 'refusé' pour garder une trace
+    await pool.query("UPDATE history SET status = 'refuser' WHERE id = $1", [history_id]);
+    
+    // On peut aussi supprimer l'image locale pour gagner de la place
+    const fileRes = await pool.query("SELECT image_url FROM history WHERE id = $1", [history_id]);
+    if (fileRes.rows.length > 0 && fileRes.rows[0].image_url.startsWith('/uploads/')) {
+        const filePath = path.join(__dirname, fileRes.rows[0].image_url);
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Erreur rejet" });
+  }
+});
+
+// ==========================================
+// 🧠 ROUTE MISE À JOUR MODÈLE (Depuis Colab)
+// ==========================================
+
+// Configuration Multer spéciale pour accepter JSON et BIN sans renommage
+const uploadModel = multer({ storage: multer.memoryStorage() });
+
+app.post('/api/admin/update-model', uploadModel.any(), async (req, res) => {
+  // Sécurité basique : Tu peux ajouter un check de token ici si tu veux
+  // const secret = req.headers['x-api-key'];
+  // if (secret !== 'MON_SUPER_SECRET') return res.status(403).send('Interdit');
+
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: "Aucun fichier reçu" });
+    }
+
+    console.log(`🧠 Réception d'une mise à jour modèle : ${req.files.length} fichiers.`);
+
+    // On boucle sur chaque fichier reçu (model.json, group1-shard1of3.bin, etc.)
+    for (const file of req.files) {
+      const filename = file.originalname;
+      const fileData = file.buffer;
+
+      // On met à jour ou on insère (Upsert)
+      await pool.query(
+        `INSERT INTO ai_models (filename, file_data, version) 
+         VALUES ($1, $2, 'auto-update') 
+         ON CONFLICT (filename) 
+         DO UPDATE SET file_data = EXCLUDED.file_data, created_at = NOW();`,
+        [filename, fileData]
+      );
+      console.log(`   ✅ Fichier mis à jour : ${filename}`);
+    }
+
+    res.json({ success: true, message: "Modèle mis à jour avec succès sur le VPS !" });
+
+  } catch (err) {
+    console.error("Erreur update model:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// ==========================================
+// 🤖 ROUTE IA (Pour Kaggle)
+// ==========================================
+app.get('/api/admin/export-dataset', async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT shoe_name, image_url FROM history WHERE status = 'validé' AND image_url LIKE '/uploads/dataset/%'"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: "Erreur lors de l'export" });
+  }
+});
 
 const PORT = 3000;
 app.listen(PORT, () => console.log(`🚀 Serveur Hybrid (EdgeAI + 3NF) lancé sur le port ${PORT}`));

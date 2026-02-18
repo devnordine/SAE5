@@ -4,20 +4,15 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker'; // Correction MediaType ici
 import * as tf from '@tensorflow/tfjs';
-import { bundleResourceIO, decodeJpeg } from '@tensorflow/tfjs-react-native';
+import { decodeJpeg } from '@tensorflow/tfjs-react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { loadModelFromDB } from '../utils/ModelHandler';
 
 // ⚠️ Assurez-vous que cette IP est bien celle de votre VPS ou de votre machine locale
 const API_URL = 'http://51.38.186.253:3000';
-
-// Chargement des fichiers modèles
-const modelJson = require('../assets/model/model.json');
-const modelWeights1 = require('../assets/model/group1-shard1of3.bin');
-const modelWeights2 = require('../assets/model/group1-shard2of3.bin');
-const modelWeights3 = require('../assets/model/group1-shard3of3.bin');
 
 const OUTPUT_CLASSES = {
   0: "adidas_forum_low",
@@ -54,18 +49,17 @@ export default function CameraClassifier() {
 
   const [currentUserId, setCurrentUserId] = useState(null);
 
-  // 1. Chargement du modèle TensorFlow
+// 1. Chargement du modèle TensorFlow (Dynamique via VPS)
   useEffect(() => {
     (async () => {
-      await tf.ready();
       try {
-        const loadedModel = await tf.loadGraphModel(
-          bundleResourceIO(modelJson, [modelWeights1, modelWeights2, modelWeights3])
-        );
+        // On appelle ta super fonction qui gère le téléchargement et le cache !
+        const loadedModel = await loadModelFromDB();
         setModel(loadedModel);
-        console.log("Modèle chargé !");
+        console.log("✅ Modèle chargé et prêt dans la caméra !");
       } catch (err) {
         console.error("Error loading model", err);
+        Alert.alert("Erreur", "Impossible de charger le modèle IA.");
       }
     })();
   }, []);
